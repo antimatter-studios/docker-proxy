@@ -18,8 +18,25 @@ elif [[ ${RESOLVERS} =~ ${SCOPED_IPV6_REGEX} ]]; then
 	RESOLVERS=$(echo "${RESOLVERS}" | sed -r "s/${SCOPED_IPV6_REGEX}//g" | xargs echo -n); export RESOLVERS
 fi
 
-dest=$(dirname ${NGINX_CONF})
-echo "Copying template to $dest"
-cp /app/nginx.tmpl $dest
+if [ -z ${NGINX_CONF} ]; then
+	echo "The container must provide the NGINX_CONF file which is the filename of the generated nginx configuration that will be used"
+	exit 1
+fi
+
+dir=$(dirname ${NGINX_CONF})
+if [ -f "${dir}" ]; then 
+	echo "Error, directory '${dir}' was a file, deleting it"
+	rm ${dir}
+fi
+
+if [ ! -d "${dir}" ]; then
+	echo "Directory '${dir}' does not exist, creating it"
+	mkdir -p ${dir}
+fi
+
+src=/app/nginx.tmpl
+dest=${dir}/nginx.tmpl
+echo "Copying '${src}' template to '${dest}'"
+cp ${src} ${dest}
 
 exec "$@"

@@ -19,6 +19,7 @@ services:
       - docker_config_gen:/config
     ports:
       - "80:80"
+      - "443:443"
     environment:
       - NGINX_CONF=/config/docker-proxy/nginx.conf
 
