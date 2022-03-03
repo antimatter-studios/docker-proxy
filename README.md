@@ -1,5 +1,5 @@
-# docker-dev-tools-proxy
-A docker monitoring nginx proxy which self configures servers and upstreams based on docker container configurations
+# docker-proxy
+A docker monitoring nginx based reverse proxy which self configures servers and upstreams based on docker container configurations
 
 The project started as a fork of the popular nginx-proxy project. But has since diverged so much that the goal now is to eventually reach feature parity with the original project whilst superceding it
 

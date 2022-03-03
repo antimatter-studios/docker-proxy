@@ -1,26 +1,26 @@
 version: '3'
 
 volumes:
-  ddt_config_gen:
+  docker_config_gen:
     external: true
-    name: ddt_config_gen
+    name: docker_config_gen
 
 services:
-  ddt-proxy:
-    image: antimatter-studios/nginx-proxy:latest
-    container_name: ddt-proxy
+  docker-proxy:
+    image: antimatter-studios/docker-proxy:latest
+    container_name: docker-proxy
     build:
       context: .
     labels:
-      - ddt-config-gen.input=/ddt-proxy/nginx.tmpl
-      - ddt-config-gen.output=/ddt-proxy/nginx.conf
-      - ddt-config-gen.exec="/app/reload.sh"
+      - docker-config-gen.input=/docker-proxy/nginx.tmpl
+      - docker-config-gen.output=/docker-proxy/nginx.conf
+      - docker-config-gen.exec="/app/reload.sh"
     volumes:
-      - ddt_config_gen:/config
+      - docker_config_gen:/config
     ports:
       - "80:80"
     environment:
-      - NGINX_CONF=/config/ddt-proxy/nginx.conf
+      - NGINX_CONF=/config/docker-proxy/nginx.conf
 
   whoami:
     image: jwilder/whoami
