@@ -7,12 +7,11 @@ volumes:
 
 services:
   ddt-proxy:
-    image: antimatter-studios/docker-dev-tools-proxy:latest
+    image: antimatter-studios/nginx-proxy:latest
     container_name: ddt-proxy
     build:
       context: .
     labels:
-      - ddt-config-gen.mode=scan-networks
       - ddt-config-gen.input=/ddt-proxy/nginx.tmpl
       - ddt-config-gen.output=/ddt-proxy/nginx.conf
       - ddt-config-gen.exec="/app/reload.sh"
