@@ -1,0 +1,437 @@
+<% 
+const upstreamConfig = [];
+for (const [containerId, container] of Object.entries(containerList)) {
+	for (const [networkName, networkConfigList] of Object.entries(container.network)) {
+		for(networkConfig of networkConfigList) {
+			const upstreamName = `${container.name}-${networkConfig.port}`;
+
+			if(typeof upstreamConfig[upstreamName] === 'undefined') {
+				upstreamConfig[upstreamName] = {};	
+			}
+
+			upstreamConfig[upstreamName][networkName] = networkConfig;
+		}
+	}
+}
+
+const serverConfig = {};
+for (const [containerId, container] of Object.entries(containerList)) {
+	for (const vhost of container.config) { 
+		if(typeof serverConfig[vhost.host] === 'undefined'){
+			serverConfig[vhost.host] = {vhost, location: []};
+		}
+
+		serverConfig[vhost.host].location.push({
+			containerName: container.name, 
+			port: vhost.port,
+			path: vhost.path,
+			proto: vhost.proto,
+		});
+	}
+}
+
+%>
+
+# If we receive X-Forwarded-Proto, pass it through; otherwise, pass along the
+# scheme used to connect to this server
+map $http_x_forwarded_proto $proxy_x_forwarded_proto {
+  default $http_x_forwarded_proto;
+  ''      $scheme;
+}
+
+# If we receive X-Forwarded-Port, pass it through; otherwise, pass along the
+# server port the client connected to
+map $http_x_forwarded_port $proxy_x_forwarded_port {
+  default $http_x_forwarded_port;
+  ''      $server_port;
+}
+
+# If we receive Upgrade, set Connection to "upgrade"; otherwise, delete any
+# Connection header that may have been passed to this server
+map $http_upgrade $proxy_connection {
+  default upgrade;
+  '' close;
+}
+
+# Apply fix for very long server names
+server_names_hash_bucket_size 128;
+
+<% if(fs.existsSync("/etc/nginx/dhparam/dhparam.pem")) { %>
+# Default dhparam
+ssl_dhparam /etc/nginx/dhparam/dhparam.pem;
+<% } %>
+
+# Set appropriate X-Forwarded-Ssl header based on $proxy_x_forwarded_proto
+map $proxy_x_forwarded_proto $proxy_x_forwarded_ssl {
+  default off;
+  https on;
+}
+
+gzip_types text/plain text/css application/javascript application/json application/x-javascript text/xml application/xml application/xml+rss text/javascript;
+
+log_format vhost '$host $remote_addr - $remote_user [$time_local] '
+                 '"$request" $status $body_bytes_sent '
+                 '"$http_referer" "$http_user_agent" '
+                 '"$upstream_addr"';
+
+access_log off;
+
+<% if (server.resolvers) { %>
+resolver <%=server.resolvers%>
+<% }  %>
+
+<% if (fs.existsSync("/etc/nginx/proxy.conf")) { %>
+include /etc/nginx/proxy.conf;
+<% } else { %>
+# HTTP 1.1 support
+proxy_http_version 1.1;
+proxy_buffering off;
+proxy_set_header Host $http_host;
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection $proxy_connection;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $proxy_x_forwarded_proto;
+proxy_set_header X-Forwarded-Ssl $proxy_x_forwarded_ssl;
+proxy_set_header X-Forwarded-Port $proxy_x_forwarded_port;
+
+# Mitigate httpoxy attack (see README for details)
+proxy_set_header Proxy "";
+<% } %>
+
+<% for (const [name, networkList] of Object.entries(upstreamConfig)) { %>
+	upstream <%=name%> {
+		<% for (const [networkName, config] of Object.entries(networkList)) { %>
+			## Can be connected with "<%=networkName%>" network
+			server <%=config.ip%>:<%=config.port%>;
+		<% } %>
+		
+		<% /* %>
+		# Support swarm mode, this is the original code, fallback included
+		{{/ * If we got the containers from swarm and this container's port is published to host, use host IP:PORT * /}}
+		{{ if and .Node.ID $address.HostPort }}
+			# {{ $container.Node.Name }}/{{ $container.Name }}
+			server {{ $container.Node.Address.IP }}:{{ $address.HostPort }};
+		{{/ * If there is no swarm node or the port is not published on host, use container's IP:PORT * /}}
+		{{ else if $n }}
+			# {{ $container.Name }}
+			server {{ $n.IP }}:{{ $address.Port }};
+		{{ end }}
+		<% */ %>
+
+		<% /* %>
+		# TODO: write new debugging output
+		# Exposed ports: {{ $container.Addresses }}
+		# Default virtual port: {{ $defaultPort }}
+		# Requested virtual port: {{ $port }}
+		{{ if not $address }}
+			# ERROR: virtual port not exposed
+		{{ end }}
+		<% */ %>
+
+		# Fallback entry (see: nginx-proxy/nginx-proxy#1105)
+		server 127.0.0.1 down;
+	}
+<% } %>
+
+server {
+	# This is just an invalid value which will never trigger on a real hostname.
+	server_name _;
+	server_tokens off;
+	
+	listen <%=server.httpPort%>;
+	
+	<% if(server.enableIpv6) { %>
+	listen [::]:<%=server.httpPort%>;
+	<% } %>
+	
+	<% if (server.accessLogEnabled) { %>
+	access_log <%=server.accessLog%> vhost;
+	<% } %>
+	
+	return 503;
+}
+
+<% if (fs.existsSync("/etc/nginx/certs/default.crt") && fs.existsSync("/etc/nginx/certs/default.key")) { %>
+server {
+	# This is just an invalid value which will never trigger on a real hostname.
+	server_name _; 
+	server_tokens off;
+	
+	listen <%=server.httpsPort%> ssl http2;
+	<% if(server.enableIpv6) { %>
+	listen [::]:<%=server.httpsPort%> ssl http2;
+	<% } %>
+	
+	<% if (server.accessLogEnabled) { %>
+	access_log <%=server.accessLog%> vhost;
+	<% } %>
+	
+	return 503;
+
+	ssl_session_cache shared:SSL:50m;
+	ssl_session_tickets off;
+	ssl_certificate /etc/nginx/certs/default.crt;
+	ssl_certificate_key /etc/nginx/certs/default.key;
+}
+<% } %>
+
+<% for (const [host, data] of Object.entries(serverConfig)) { %>	
+	<% const vhost = data.vhost %>
+	<%# TODO: fix cert variable %>
+	<% let cert = null %>
+	<% let hasCerts = cert !== null && fs.existsSync(`/etc/nginx/certs/${cert}.crt`) && fs.existsSync(`/etc/nginx/certs/${cert}.key`) %>
+	<% let isHttps = hasCerts && vhost.httpsMethod != 'nohttps' %>
+	<% if (isHttps) { %>
+		<% if (vhost.httpsMethod === 'redirect') { %>
+			server {
+				server_name <%=host%>;
+				<% if(vhost.serverTokens) { %>
+				server_tokens <%=vhost.serverTokens%>;
+				<% } %>
+
+				listen <%=server.httpPort%> <%=server.default_server%>;
+				
+				<% if (server.enableIpv6) { %>
+				listen [::]:<%=server.httpPort%> <%=server.default_server%>;
+				<% } %>
+
+				<% if (server.accessLogEnabled) { %>
+				access_log <%=server.accessLog%> vhost;
+				<% } %>
+				
+				# Do not HTTPS redirect Let'sEncrypt ACME challenge
+				location ^~ /.well-known/acme-challenge/ {
+					auth_basic off;
+					auth_request off;
+					allow all;
+					root /usr/share/nginx/html;
+					try_files $uri =404;
+					break;
+				}
+				
+				location / {
+					<% if (server.httpsPort === "443") { %>
+					return 301 https://$host$request_uri;
+					<% } else { %>
+					return 301 https://$host:<%=server.httpsPort%>$request_uri;
+					<% } %>
+				}
+			}
+		<% } %>
+
+		server {
+			server_name <%=host%>;
+			
+			<% if(vhost.serverTokens) { %>
+			server_tokens <%=vhost.serverTokens%>;
+			<% } %>
+
+			listen <%=server.httpsPort%> ssl http2 <%=server.default_server%>;
+			<% if(server.enableIpv6) { %>
+			listen [::]:<%=server.httpsPort%> ssl http2 <%=server.default_server%>;
+			<% } %>
+
+			<% if (server.accessLogEnabled) { %>
+			access_log <%=server.accessLog%> vhost;
+			<% } %>
+
+			<% if (vhost.networkTag === 'internal') { %>
+			# Only allow traffic from internal clients
+			include /etc/nginx/network_internal.conf;
+			<% } %>
+
+			<% if (server.sslPolicy === "Mozilla-Modern") { %>
+				# ssl policy: Mozilla-Modern
+				ssl_protocols TLSv1.3;
+				# nginx currently lacks ability to choose ciphers in TLS 1.3 in configuration, see https://trac.nginx.org/nginx/ticket/1529
+				# a possible workaround can be modify /etc/ssl/openssl.cnf to change it globally (see https://trac.nginx.org/nginx/ticket/1529#comment:12 )
+				# explicitly set ngnix default value in order to allow single servers to override the global http value
+				ssl_ciphers HIGH:!aNULL:!MD5;
+				ssl_prefer_server_ciphers off;
+			<% } else if (server.sslPolicy === "Mozilla-Intermediate") { %>
+				# ssl policy: Mozilla-Intermediate
+				ssl_protocols TLSv1.2 TLSv1.3;
+				ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384';
+				ssl_prefer_server_ciphers off;
+			<% } else if (server.sslPolicy === "Mozilla-Old") { %>
+				# ssl policy: Mozilla-Old
+				ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
+				ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA:ECDHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA256:DHE-RSA-AES256-SHA256:AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA256:AES256-SHA256:AES128-SHA:AES256-SHA:DES-CBC3-SHA';
+				ssl_prefer_server_ciphers on;
+			<% } else if (server.sslPolicy === "AWS-TLS-1-2-2017-01") { %>
+				# ssl policy: AWS-TLS-1-2-2017-01
+				ssl_protocols TLSv1.2 TLSv1.3;
+				ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA384:AES128-GCM-SHA256:AES128-SHA256:AES256-GCM-SHA384:AES256-SHA256';
+				ssl_prefer_server_ciphers on;
+			<% } else if (server.sslPolicy === "AWS-TLS-1-1-2017-01") { %>
+				# ssl policy: AWS-TLS-1-1-2017-01
+				ssl_protocols TLSv1.1 TLSv1.2 TLSv1.3;
+				ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES256-SHA:ECDHE-ECDSA-AES256-SHA:AES128-GCM-SHA256:AES128-SHA256:AES128-SHA:AES256-GCM-SHA384:AES256-SHA256:AES256-SHA';
+				ssl_prefer_server_ciphers on;
+			<% } else if (server.sslPolicy === "AWS-2016-08") { %>
+				# ssl policy: AWS-2016-08
+				ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
+				ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES256-SHA:ECDHE-ECDSA-AES256-SHA:AES128-GCM-SHA256:AES128-SHA256:AES128-SHA:AES256-GCM-SHA384:AES256-SHA256:AES256-SHA';
+				ssl_prefer_server_ciphers on;
+			<% } else if (server.sslPolicy === "AWS-2015-05") { %>
+				# ssl policy: AWS-2015-05
+				ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
+				ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES256-SHA:ECDHE-ECDSA-AES256-SHA:AES128-GCM-SHA256:AES128-SHA256:AES128-SHA:AES256-GCM-SHA384:AES256-SHA256:AES256-SHA:DES-CBC3-SHA';
+				ssl_prefer_server_ciphers on;
+			<% } else if (server.sslPolicy === "AWS-2015-03") { %>
+				# ssl policy: AWS-2015-03
+				ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
+				ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES128-SHA:DHE-RSA-AES128-SHA:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES256-SHA:ECDHE-ECDSA-AES256-SHA:AES128-GCM-SHA256:AES128-SHA256:AES128-SHA:AES256-GCM-SHA384:AES256-SHA256:AES256-SHA:DHE-DSS-AES128-SHA:DES-CBC3-SHA';
+				ssl_prefer_server_ciphers on;
+			<% } else if (server.sslPolicy === "AWS-2015-02") { %>
+				# ssl policy: AWS-2015-02
+				ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
+				ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES128-SHA:DHE-RSA-AES128-SHA:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES256-SHA:ECDHE-ECDSA-AES256-SHA:AES128-GCM-SHA256:AES128-SHA256:AES128-SHA:AES256-GCM-SHA384:AES256-SHA256:AES256-SHA:DHE-DSS-AES128-SHA';
+				ssl_prefer_server_ciphers on;
+			<% } %>
+
+			ssl_session_timeout 5m;
+			ssl_session_cache shared:SSL:50m;
+			ssl_session_tickets off;
+
+			ssl_certificate /etc/nginx/certs/<%=cert%>.crt;
+			ssl_certificate_key /etc/nginx/certs/<%=cert%>.key;
+
+			<% if (fs.existsSync("/etc/nginx/certs/" + cert + ".dhparam.pem")) { %>
+			ssl_dhparam /etc/nginx/certs/<%=cert%>.dhparam.pem;
+			<% } %>
+
+			<% if (fs.existsSync("/etc/nginx/certs/" + cert + ".chain.pem")) { %>
+			ssl_stapling on;
+			ssl_stapling_verify on;
+			ssl_trusted_certificate /etc/nginx/certs/<%=cert%>.chain.pem;
+			<% } %>
+
+			{{ if (not (or (eq $https_method "noredirect") (eq $hsts "off"))) }}
+			add_header Strict-Transport-Security "<%=vhost.hsts%>" always;
+			{{ end }}
+
+			<% if (fs.existsSync(`/etc/nginx/vhost.d/${host}`)) { %>
+			include /etc/nginx/vhost.d/<%=host%>;
+			<% } else if (fs.existsSync("/etc/nginx/vhost.d/default")) { %>
+			include /etc/nginx/vhost.d/default;
+			<% } %>
+
+			<% for (location of data.location) { %>
+				<% modifier = location.path.startsWith('^') ? '~' : '' %>
+	
+				location <%=modifier%> '<%=location.path%>' {
+					<% if (location.proto === 'uwsgi') { %>
+					include uwsgi_params;
+					uwsgi_pass <%=location.proto%>://<%=location.containerName%>-<%=location.port%>;
+					<% } else if (location.proto === 'fastcgi') { %>
+					root <%=vhost.root%>;
+					include fastcgi_params;
+					fastcgi_pass <%=location.containerName%>-<%=location.port%>;
+					<% } else if (location.proto === 'grpc') { %>
+					grpc_pass <%=location.proto%>://<%=location.containerName%>-<%=location.port%>;
+					<% } else { %>
+					proxy_pass <%=location.proto%>://<%=location.containerName%>-<%=location.port%>;
+					<% } %>
+	
+					<% if (fs.existsSync(`/etc/nginx/htpasswd/${host}`)) { %>
+					auth_basic "Restricted <%=host%>";
+					auth_basic_user_file /etc/nginx/htpasswd/<%=host%>;
+					<% } %>
+	
+					<% if (fs.existsSync(`/etc/nginx/vhost.d/${host}_location`)) { %>
+					include /etc/nginx/vhost.d/<%=host%>_location;
+					<% } else if (fs.existsSync("/etc/nginx/vhost.d/default_location")) { %>
+					include /etc/nginx/vhost.d/default_location;
+					<% } %>
+				}
+			<% } %>
+		}
+	<% } %>
+
+	<% if (!isHttps || vhost.httpsMethod === 'noredirect') { %>
+	server {
+		server_name <%=host%>
+		<% if (vhost.serverTokens) { %>
+		server_tokens <%=vhost.serverTokens%>;
+		<% } %>
+		
+		listen <%=server.httpPort%> <%=vhost.default_server%>;
+		<% if (vhost.enableIpv6) { %>
+		listen [::]:80 <%=vhost.default_server%>;
+		<% } %>
+
+		<% if (server.accessLogEnabled) { %>
+		access_log <%=server.accessLog%> vhost;
+		<% } %>
+
+		<% if (vhost.networkTag === 'internal') { %>
+		# Only allow traffic from internal clients
+		include /etc/nginx/network_internal.conf;
+		<% } %>
+
+		<% if (fs.existsSync(`/etc/nginx/vhost.d/${host}`)) { %>
+		include /etc/nginx/vhost.d/<%=host%>;
+		<% } else if (fs.existsSync("/etc/nginx/vhost.d/default")) { %>
+		include /etc/nginx/vhost.d/default;
+		<% } %>
+
+		<% for (location of data.location) { %>
+			<% modifier = location.path.startsWith('^') ? '~' : '' %>
+
+			location <%=modifier%> '<%=location.path%>' {
+				<% if (location.proto === "uwsgi") { %>
+				include uwsgi_params;
+				uwsgi_pass <%=location.proto%>://<%=location.containerName%>-<%=location.port%>;
+				<% } else if (location.proto === "fastcgi") { %>
+				root <%=vhost.root%>;
+				include fastcgi_params;
+				# TODO: shouldn't this have a port 9000 too?
+				fastcgi_pass <%=location.containerName%>-<%=location.port%>;
+				<% } else if (location.proto === "grpc") { %>
+				grpc_pass <%=location.proto%>://<%=location.containerName%>-<%=location.port%>;
+				<% } else { %>
+				proxy_pass <%=location.proto%>://<%=location.containerName%>-<%=location.port%>;
+				<% } %>
+
+				<% if (fs.existsSync(`/etc/nginx/htpasswd/${host}`)) { %>
+				auth_basic	"Restricted <%=host%>";
+				auth_basic_user_file /etc/nginx/htpasswd/<%=host%>;
+				<% } %>
+
+				<% if (fs.existsSync(`/etc/nginx/vhost.d/${host}_location`)) { %>
+				include /etc/nginx/vhost.d/<%=host%>_location;
+				<% } else if (fs.existsSync("/etc/nginx/vhost.d/default_location")) { %>
+				include /etc/nginx/vhost.d/default_location;
+				<% } %>
+			}
+		<% } %>
+	}
+	<% } %>
+
+	<% /* DISABLE THIS FOR NOW %>
+	{{ if (and (not $is_https) (exists "/etc/nginx/certs/default.crt") (exists "/etc/nginx/certs/default.key")) }}
+	server {
+		server_name {{ $host }};
+		{{ if $server_tokens }}
+		server_tokens {{ $server_tokens }};
+		{{ end }}
+		listen {{ $server.httpsPort }} ssl http2 {{ $default_server }};
+		
+		{{ if $enable_ipv6 }}
+		listen [::]:{{ $server.httpsPort }} ssl http2 {{ $default_server }};
+		{{ end }}
+
+		<% if (server.accessLogEnabled) { %>
+		access_log <%=server.accessLog%> vhost;
+		<% } %>
+		
+		return 500;
+
+		ssl_certificate /etc/nginx/certs/default.crt;
+		ssl_certificate_key /etc/nginx/certs/default.key;
+	}
+	{{ end }}
+	<% */ %>
+<% } %>
