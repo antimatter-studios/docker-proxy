@@ -1,0 +1,69 @@
+name: Docker
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - '*.*.*'
+    paths-ignore:
+      - 'test/*'
+      - '.gitignore'
+      - 'docker-compose.yml'
+      - 'LICENSE'
+      - '*.md'
+
+env:
+  registry: ghcr.io
+
+jobs:
+  multiarch-build:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Get Docker tags
+        id: docker_meta
+        uses: crazy-max/ghaction-docker-meta@v2
+        with:
+          images: |
+            ${{ env.registry }}/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          labels: |
+            org.opencontainers.image.authors=Chris Thomas <chris.thomas@antimatter-studios.com> (@chrisalexthomas)
+            org.opencontainers.image.version=${{ env.GIT_DESCRIBE }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Login to Docker Registry
+        uses: docker/login-action@v1
+        with:
+          registry: ${{ env.registry }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the image
+        id: docker_build
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}
+
+      - name: Images digests
+        run: echo ${{ steps.docker_build.outputs.digest }}
