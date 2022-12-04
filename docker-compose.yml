@@ -3,27 +3,29 @@ version: '3'
 volumes:
   docker_config_gen:
     external: true
-    name: docker_config_gen
+    name: ${DOCKER_CONFIG_GEN_VOLUME:-docker_config_gen}
 
 services:
   docker-proxy:
-    image: antimatter-studios/docker-proxy:latest
+    image: ghcr.io/antimatter-studios/docker-proxy:latest
     container_name: docker-proxy
     build:
       context: .
     labels:
-      - docker-config-gen.input=/docker-proxy/nginx.tmpl
-      - docker-config-gen.output=/docker-proxy/nginx.conf
-      - docker-config-gen.exec="/app/reload.sh"
+      - docker-config-gen.input=docker-proxy/nginx.template
+      - docker-config-gen.output=docker-proxy/nginx.conf
+      - docker-config-gen.exec="/app/scripts/reload.sh"
     volumes:
       - docker_config_gen:/config
+      - ./html:/etc/nginx/html
+      - ./nginx.template:/app/nginx.template
     ports:
       - "80:80"
       - "443:443"
-    environment:
-      - NGINX_CONF=/config/docker-proxy/nginx.conf
+    # If you want to override the labels and volumes with custom values
+    # You need to make these values match so the tooling can find them
+    # environment:
+    #   - CONFIG=/config
+    #   - TEMPLATE=nginx.template
+    #   - NGINX_CONF=docker-proxy/nginx.conf
 
-  whoami:
-    image: jwilder/whoami
-    environment:
-      - VIRTUAL_HOST=whoami.local

@@ -1,0 +1,84 @@
+# If we receive X-Forwarded-Proto, pass it through; otherwise, pass along the
+# scheme used to connect to this server
+map $http_x_forwarded_proto $proxy_x_forwarded_proto {
+  default $http_x_forwarded_proto;
+  ''      $scheme;
+}
+
+# If we receive X-Forwarded-Port, pass it through; otherwise, pass along the
+# server port the client connected to
+map $http_x_forwarded_port $proxy_x_forwarded_port {
+  default $http_x_forwarded_port;
+  ''      $server_port;
+}
+
+# If we receive Upgrade, set Connection to "upgrade"; otherwise, delete any
+# Connection header that may have been passed to this server
+map $http_upgrade $proxy_connection {
+  default upgrade;
+  '' close;
+}
+
+# Apply fix for very long server names
+server_names_hash_bucket_size 128;
+
+# Set appropriate X-Forwarded-Ssl header based on $proxy_x_forwarded_proto
+map $proxy_x_forwarded_proto $proxy_x_forwarded_ssl {
+  default off;
+  https on;
+}
+
+gzip_types text/plain text/css application/javascript application/json application/x-javascript text/xml application/xml application/xml+rss text/javascript;
+
+log_format vhost '$host $remote_addr - $remote_user [$time_local] '
+                 '"$request" $status $body_bytes_sent '
+                 '"$http_referer" "$http_user_agent" '
+                 '"$upstream_addr"';
+
+access_log off;
+
+include /etc/nginx/proxy.conf;
+
+# This is just an invalid/default/catchall value which will never trigger on a real hostname.
+server {
+	server_name _;
+	server_tokens off;
+	
+	listen 80;
+	
+	access_log /var/log/nginx/access.log main;
+
+	<% for(const index in errorPageData) { %>
+	add_header x-proxy-upstream-<%=+(index)+1%> "<%=errorPageData[index]%>";
+	<% } %>
+	
+	root html;
+    index 503.html;
+}
+
+<% for(const server of serverList) { %>
+server {
+	server_name <%=server.host%>;
+	listen 80;
+	access_log /var/log/nginx/access.log vhost;
+
+	<% for(const location of server.locations) { %>
+	<% const regex = location.pathIsRegex ? "~" : "" %>
+	location <%=regex%> "<%=location.path%>" {
+		proxy_pass <%=location.protocol%>://<%=location.upstream%>;
+	}
+	<% } %>
+}
+<% } %>
+
+<% for(const upstream of upstreamList) { %>
+upstream <%=upstream.name%> {
+	<% for(const network of upstream.networks) { %>
+	# using network '<%=network.name%>'
+	server <%=network.ipAddress%>:<%=network.port%>;
+	<% } %>
+
+	# Fallback entry for container '<%=upstream.name%>'
+	server 127.0.0.1 down;
+}
+<% } %> 
