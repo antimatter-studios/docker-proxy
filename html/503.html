@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<head>
+    <title>503 - The upstream address was not recognised</title>
+    <script type="text/javascript" src="503.js"></script>
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <link rel="stylesheet" type="text/css" href="styles.css" />
+</head>
+
+<body>
+    <header>
+        <img id="logo" src="logo.png" alt="Antimatter Logo" />
+        <div>
+            <h1>Docker Proxy</h1>
+            <h2>No Upstream was found for this url</h2>
+        </div>
+    </header>
+
+    <article>
+        <h3>Registered Upstreams:</h3>
+        <table id="upstream-list">
+            <thead>
+                <tr>
+                    <th>URL</th>
+                    <th>Container Name</th>
+                </tr>
+            </thead>
+
+            <tbody>
+
+            </tbody>
+        </table>
+    </article>
+
+    <footer>
+        <p>2022 - Antimatter Studios</p>
+    </footer>
+
+    <template id="upstream-template">
+        <tr class="upstream">
+            <td class="url"></td>
+            <td class="container"></td>
+        </tr>
+    </template>
+</body>
