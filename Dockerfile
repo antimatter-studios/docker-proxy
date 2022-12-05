@@ -16,7 +16,6 @@ RUN echo "Writing custom nginx configuration values" \
  && sed -i 's/worker_processes  1/worker_processes  auto/' /etc/nginx/nginx.conf \
  && sed -i 's/worker_connections  1024/worker_connections  10240/' /etc/nginx/nginx.conf
 
-COPY default.conf /etc/nginx/conf.d/default.conf
 COPY network_internal.conf /etc/nginx/
 COPY proxy.conf /etc/nginx/
 COPY html /etc/nginx/html
