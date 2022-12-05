@@ -1,13 +1,29 @@
 <!DOCTYPE html>
 <head>
-    <title>200 - Docker Nginx Proxy</title>
+    <title>200 - Docker Proxy is Ready</title>
     <link rel="icon" type="image/png" href="favicon.png" />
     <link rel="stylesheet" type="text/css" href="styles.css" />
 </head>
+
 <body>
-    <p> This is a response from the Docker Nginx Proxy</p>
-    <p> This page is only visible when the custom configuration 
-        file generated for your proxy configuration was not triggered correctly.
-    </p>
-    <p> Then some help information about the proxy so you can know things to check</p>
+    <header>
+        <img id="logo" src="logo.png" alt="Antimatter Logo" />
+        <div>
+            <h1>Docker Proxy</h1>
+            <h2>The proxy has no configurations</h2>
+        </div>
+    </header>
+
+    <article>
+        <h3>Why are you seeing this page?</h3>
+        <p> This software, Docker Proxy, works in tandem with the Docker Config Gen software
+            which it uses to securely generate the '/etc/nginx/conf.d/default.conf' file by providing
+            Docker Config Gen with a template, which is used to generate the final configuration file.
+        </p>
+        <p> This page is displayed when no configuration is being generated. So this is a default landing page</p>
+    </article>
+
+    <footer>
+        <p>2022 - <a href="https://antimatter-studios.com" target="_blank">Antimatter Studios</a></p>
+    </footer>
 </body>
