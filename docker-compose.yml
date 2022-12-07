@@ -1,31 +1,20 @@
 version: '3'
 
-volumes:
-  docker_config_gen:
-    external: true
-    name: ${DOCKER_CONFIG_GEN_VOLUME:-docker_config_gen}
-
 services:
   docker-proxy:
     image: ghcr.io/antimatter-studios/docker-proxy:latest
     container_name: docker-proxy
-    build:
-      context: .
+    build: .
     labels:
-      - docker-config-gen.input=docker-proxy/nginx.template
-      - docker-config-gen.output=docker-proxy/nginx.conf
-      - docker-config-gen.exec="/app/scripts/reload.sh"
+      - docker-config-gen.request=/app/scripts/request.sh
+      - docker-config-gen.response=/app/scripts/response.sh
+      - docker-config-gen.renderer=nginx
     volumes:
-      - docker_config_gen:/config
+      # DEV MODE: uncomment this to quickly edit the 200, 503 templates
       - ./html:/etc/nginx/html
-      - ./nginx.template:/app/nginx.template
+      # DEV MODE: uncomment this to let you edit the entire app directory on the fly
+      - ./:/app
+      # DEV MODE: BUT! After each update, you need to run docker exec -it docker-proxy /app/copy-template.sh
     ports:
       - "80:80"
       - "443:443"
-    # If you want to override the labels and volumes with custom values
-    # You need to make these values match so the tooling can find them
-    # environment:
-    #   - CONFIG=/config
-    #   - TEMPLATE=nginx.template
-    #   - NGINX_CONF=docker-proxy/nginx.conf
-

@@ -1,11 +1,6 @@
 FROM nginx:alpine
 LABEL maintainer="Chris Thomas <chris.alex.thomas@gmail.com> (@chrisalexthomas)"
 
-# These are defaults that you can override in your docker-compose if you want
-ENV CONFIG=/config
-ENV NGINX_CONF=docker-proxy/nginx.conf
-ENV TEMPLATE=nginx.template
-
 # Install wget and install/updates certificates
 RUN apk add --no-cache --virtual .run-deps \
     ca-certificates bash wget openssl \
