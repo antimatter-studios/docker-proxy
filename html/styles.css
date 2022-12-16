@@ -49,6 +49,12 @@ pre.allow-format {
     white-space: pre-wrap;
 }
 
+.quick-help {
+    border: thin solid #000000;
+    padding: 0.5rem 2rem;
+    margin: 1rem 0;
+}
+
 #upstream-list {
     width: 100%;
     border-collapse: collapse;

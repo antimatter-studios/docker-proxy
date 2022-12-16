@@ -22,6 +22,56 @@
         </p>
         <p> This page is displayed when no configuration is being generated. So this is a default landing page</p>
 
+        <h3>Quick Help</h3>
+
+        <div class="quick-help">
+            <h4>TL; DR. Probably there are no configurations or networks being monitored, try this:</h4>
+            <p><b>*** PLEASE NOTE: the container Names on the system might differ from those in this example, please adjust expectations accordingly ***</b></p>
+            <pre>
+                # There must be 'ddt-proxy' and 'ddt-config-gen' running in order to have a properly working system
+                $ docker ps --format '{{.Names}}'
+                ddt-proxy
+                ddt-config-gen
+
+                # Check port 80 and 443 are being used by 'ddt-proxy'
+                $ docker ps --format '{{.Ports}}' --filter "name=ddt-proxy"
+                0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp
+
+                # Check what networks the 'ddt-proxy' is active on
+                $ docker container inspect docker-proxy -f '{{range $r,$v := .NetworkSettings.Networks}}{{printf "%s\n" $r}}{{end}}'
+                public
+
+                # Check a container expected to work, is on the SAME NETWORK
+                $ docker container inspect mycompanyapi-1 -f '{{range $r,$v := .NetworkSettings.Networks}}{{printf "%s\n" $r}}{{end}}'
+                public
+
+                # Does the container have the required labels, 'host' is absolutely the bare minimum
+                $ docker container inspect mycompanyapi-1 --format '{{range $k,$v := .Config.Labels}}{{printf "%s = %s\n" $k $v}}{{end}}' | grep docker-proxy
+                docker-proxy.main.host=~api.mycompany.develop$$
+                docker-proxy.main.port=5000
+
+                # Maybe the container uses environment variables, 'VIRTUAL_HOST' is absolutely the bare minimum
+                $ docker container inspect mycompanyapi-1 --format '{{range $v := .Config.Env}}{{printf "%s\n" $v}}{{end}}' | grep VIRTUAL
+                VIRTUAL_HOST=~api.mycompany.develop$$
+                VIRTUAL_PORT=5000
+            </pre>
+
+            <p> If opening the configured ip address in a web browser presents the "The proxy has no configurations" page, then no configuration is being
+                generated and no containers are found. Check Docker Config Gen container logs, perhaps there is a reason why it won't generate, perhaps
+                the template was broken (is it a custom template?)
+            </p>
+
+            <p> If opening the configured ip address in a web browser presents the "No Upstream was found for this url" 503 style page, then a 
+                configuration is being generated, just not for the upstream that is being accessed. In that page is the expected list of upstreams 
+                found? The nginx template can be read by running:
+            </p>
+            <pre>$ docker exec -it ddt-proxy cat /etc/nginx/conf.d/default.conf</pre>
+            <p> This exhausts the list of possible quick solutions to the problem. If the problem still persists. File an issue with the project at 
+                <a href="https://github.com/antimatter-studios/docker-dev-tools">https://github.com/antimatter-studios/docker-dev-tools</a> and provide
+                information relating to the problem so that either the quick help can be updated, or a solution to the problem can be found.
+            </p>
+        </div>
+
         <h3>Does Docker Proxy require Docker Config Gen to run?</h3>
         <p> <b>YES</b>, it is absolutely required. The reason for this is for security. Docker Proxy cannot securely access the docker socket
             which would otherwise be required if you wanted to do this whole system in one container. Therefore Docker Config Gen is a 
