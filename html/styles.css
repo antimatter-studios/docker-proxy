@@ -39,6 +39,16 @@ article {
     font-size: 1.5rem;
 }
 
+pre {
+    background-color: #dedede;
+    white-space: pre-line;
+    padding: 1rem;
+}
+
+pre.allow-format {
+    white-space: pre-wrap;
+}
+
 #upstream-list {
     width: 100%;
     border-collapse: collapse;

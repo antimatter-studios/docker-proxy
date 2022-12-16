@@ -21,6 +21,181 @@
             Docker Config Gen with a template, which is used to generate the final configuration file.
         </p>
         <p> This page is displayed when no configuration is being generated. So this is a default landing page</p>
+
+        <h3>Does Docker Proxy require Docker Config Gen to run?</h3>
+        <p> <b>YES</b>, it is absolutely required. The reason for this is for security. Docker Proxy cannot securely access the docker socket
+            which would otherwise be required if you wanted to do this whole system in one container. Therefore Docker Config Gen is a 
+            software that listens to docker events and looks for containers like Docker Proxy using the container labels, then using 
+            some 'docker exec' calls between the two requests the template, gets all the containers, renders the template, then sends 
+            it back to Docker Proxy which then reloads itself
+        </p>
+        <p> <b>TL;DR</b>: Download Docker Config Gen and run it side by side Docker Proxy, you can get it here: 
+            <a href="https://github.com/antimatter-studios/docker-config-gen">https://github.com/antimatter-studios/docker-config-gen</a>
+        </p>
+        <p> If you decide to run Docker Dev Tools, then the 'ddt proxy' command will automatically run both of them side by side</p>
+        
+        <h3>How does Docker Proxy work?</h3>
+        <p> Docker Proxy does not work alone, in order to securely listen to docker events, a software called Docker Config Gen is used
+            to listen to the docker socket and listen for containers starting and stopping.
+        </p>
+        <p> A second basic part of setting up the proxy is that the proxy has to be on the same networks as the containers you want it to manage. 
+            An example would be adding an NGINX container to host a website, either with a php backend of not. The NGINX container needs to be on
+            the same network as the Docker Proxy. A good default pattern would be to create a docker network 'public' and add Docker Proxy to it. 
+            Then all the public containers that need to be managed by Docker Proxy should be also on that network too. 
+        </p>
+        <pre>
+            $ docker network create public 
+            
+            $ docker network ls
+            NETWORK ID     NAME                        DRIVER    SCOPE
+            8228fc81520d   bridge                      bridge    local
+            fb064ba19e35   host                        host      local
+            6e927ade98b6   none                        null      local
+            ac3c37709a68   public                      bridge    local
+
+            $ docker network connect public docker-proxy
+
+            # This will output all the networks as in a simple manner
+            $ docker container inspect docker-proxy -f '{{range $r,$v := .NetworkSettings.Networks}}{{printf "%s\n" $r}}{{end}}'
+            public
+        </pre>
+        <p> Docker Proxy cannot automatically create the 'public' network mentioned because it has to be a global network and it's not safe to 
+            automatically create it as it might not be what the user wants. So it is a better idea to create this manually.
+        </p>
+        <p> Docker Dev Tools for example, lets you manage networks and it will create them, but this is another software that provides that additional
+            functionality because that is the use pattern for that software. But Docker Proxy is trying to not demand to work in a particular way
+            but allow itself to be used in whatever way the user would like.
+        </p>
+
+        <h3>How do I configure containers to use with this proxy?</h3>
+        <p> In order to automatically configure and route requests to upstream containers, those containers need to add docker labels, or add environment
+            variables so Docker Config Gen can process them into the template. The safest way to add those values is to use docker container labels. The 
+            software originally was a fork of 'nginx-proxy' which is a very popular software that you can find here: <a href="https://github.com/nginx-proxy/nginx-proxy">https://github.com/nginx-proxy/nginx-proxy</a>
+        </p>
+        <h4> Configuring using docker labels <b>(Recommended)</b> inside a docker-compose.yml might be:</h4>
+        <pre class="allow-format">
+version: "3"
+services:
+    website:
+        build: .
+        networks:
+            - public
+        labels:
+            - docker-proxy.main.host=~api.mycompany.develop$$
+            - docker-proxy.main.port=5000
+            - docker-proxy.main.path=^/api-endpoint
+            - docker-proxy.main.proto=http
+        </pre>
+        <p> The only required docker label is the host field, as all the others will default to port 80, path '/', and proto http</p>
+        <p> As expected, host and path support regex using normal NGINX configuration styles. Please look those up if it is unclear.</p>
+        <p> The benefit of using docker labels is that this information is privately communicated with Docker Config Gen and does not expose
+            environment variables or potentially secret data. A second benefit is that you can expose multiple upstreams because the 
+            docker label key format is "docker-proxy.{UPSTREAM_NAME}.[host,port,path,proto]"
+        </p>
+        <p> It might be that a software being run exposes multiple ports or multiple paths, for example a control panel in addition 
+            to a public endpoint for actions. Therefore it might be useful to expose both the control panel and the public endpoint 
+            so both can be accessed. In order to configure two independent upstreams, two configurations would be required 
+            (this is why labels make it easier than environment vars). An example could be:
+        </p>
+        <pre class="allow-format">
+version: "3"
+services:
+    website:
+        build: .
+        networks:
+            - public
+        labels:
+            - docker-proxy.control-panel.host=~api.mycompany.develop$$
+            - docker-proxy.control-panel.port=80
+            - docker-proxy.control-panel.path=^/admin
+            - docker-proxy.api.host=~api.mycompany.develop$$
+            - docker-proxy.api.port=5000
+            - docker-proxy.api.path=^/api
+        </pre>
+        <p> This would let both upstreams be available and as many as required can be created</p>
+
+        <h4> Configuring using Environment Variables <b>(Not recommended)</b>:</h4>
+        <pre>
+            # Environment variables
+            VIRTUAL_HOST=~api.mycompany.develop
+            VIRTUAL_PORT=5000
+            VIRTUAL_PATH=^/api-endpoint
+            VIRTUAL_PROTO=http
+        </pre>
+        <p> The only required environment variable is 'VIRTUAL_HOST' as all the others will default to port 80, path '/', and proto http.</p>
+        <p> VIRTUAL_HOST and VIRTUAL_PATH support regex using normal NGINX configuration styles. Please look those up if it is unclear.
+        </p>
+        <p> The problem with environment variables is that these pieces of data will be injected into the environment of the container itself
+            meaning that potentially sensitive data is leaked into the environment of the software being run. This information is not useful to
+            the software, so why expose this information to the software in the first place? It could be considered secret. Therefore that is the reason
+            why using environment variables is not recommended
+        </p>
+        <p> A second problem with environment variables, is that only one configuration per container can be created. Why would this matter? Because 
+            if the software had multiple ports or paths exposed, only one of those would be usable at a time, since you cannot configure an environment
+            variable that is understandable in a reasonable way as an array. Maybe with CSV like values. But this is too complex and error prone.
+        </p>
+        
+        <h3> What is Docker Config Gen?</h3>
+        <p> Docker Config Gen is a software which runs alongside Docker Proxy and is looking for one thing, containers that have the following labels:</p>
+        <pre>
+            - docker-config-gen.request=/app/scripts/request.sh
+            - docker-config-gen.response=/app/scripts/response.sh
+            - docker-config-gen.renderer=nginx
+        </pre>
+        <p> These labels tell Docker Config Gen how to request the template to render, how to send back the template, and what template renderer to use when doing so. 
+        </p>
+        <p> Docker Proxy has these labels configured already. Docker Config Gen will find Docker Proxy with these labels, then determine what docker networks it 
+            is present on, then list all containers on each of those networks. 
+        </p>
+        <p> Once Docker Config Gen knows the list of containers on each network that Docker Proxy is on, it'll pass that container list to a template renderer given
+            using the above 'renderer' label and a new template will be renderer according to the EJS formatted template Docker Proxy gives when the 'request' script 
+            is executed. After the template is rendered, the 'response' script will be triggered with the template and Docker Proxy will write a new configuration, then
+            reload nginx to make that configuration active.
+        </p>
+        <p> The Docker Config Gen is available here for more information: <a href="https://github.com/antimatter-studios/docker-config-gen">https://github.com/antimatter-studios/docker-config-gen</a></p>
+
+        <h3>What is Docker Dev Tools?</h3>
+        <p> It was mentioned a few times above a software called 'Docker Dev Tools'. So an explanation is warranted</p>
+        <p> This is a software which provides some easy tools in order to manage your local development environment by running some command line utilities
+            that will make doing things like setting up a safe local ip address, running the Docker Proxy, managing project orchestration etc without having
+            to run complex commands. Examples would be:
+        </p>
+        <h4>Software like XDebug needs to call back to the host machine to communicate with the debugger, so a stable ip address is useful</h4>
+        <pre>$ ddt ip add 127.0.0.254</pre>
+
+        <h4>Use the Docker Proxy to automatically configure and route requests to containers when they start and stop</h4>
+        <pre>
+            $ ddt proxy start
+            Starting the Frontend Proxy: ghcr.io/antimatter-studios/docker-proxy:latest
+            59fa5fc0e32aed3d9857037916a2d62e5f79c57286a26009ce986a4a7c83e2e1
+            Running image 'ghcr.io/antimatter-studios/docker-config-gen:latest' as 'ddt-config-gen' using container id '59fa5fc0e32aed3d9857037916a2d62e5f79c57286a26009ce986a4a7c83e2e1'
+            8d93e50db797ecb62c7cd7a36cd733bc1aa276f30d74692b4056778dd81b464a
+            Connecting container 'ddt-proxy' to network 'public'
+            Running image 'ghcr.io/antimatter-studios/docker-proxy:latest' as 'ddt-proxy' using container id '8d93e50db797ecb62c7cd7a36cd733bc1aa276f30d74692b4056778dd81b464a'
+            Running Containers:
+            CONTAINER ID   IMAGE                                                 COMMAND                  CREATED          STATUS                  PORTS                                      NAMES
+            8d93e50db797   ghcr.io/antimatter-studios/docker-proxy:latest        "/docker-entrypoint..."   1 second ago     Up Less than a second   0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp   ddt-proxy
+            59fa5fc0e32a   ghcr.io/antimatter-studios/docker-config-gen:latest   "docker-entrypoint.s..."   2 seconds ago    Up 1 second                                                        ddt-config-gen
+
+            # add a new network so it can manage containers automatically
+            $ ddt proxy add-network public
+            Connecting to a new network 'public' to the proxy container 'ddt-proxy'
+            Attaching: 'public' to proxy so it can listen for containers
+            Registered proxy services:
+            Scanning Network (1/1): 'public', no containers
+            --------------------------------------------------------------------------------------------------------------
+            | Docker Network      | Container                    | Host      | Port      | Path      | Nginx Status      |
+            --------------------------------------------------------------------------------------------------------------
+            | public              | There are no containers      |           |           |           |                   |
+            --------------------------------------------------------------------------------------------------------------
+
+            # list networks proxy is managing
+            $ ddt proxy list-networks
+            Proxy Network List
+            - public
+        </pre>
+        <p>The Docker Dev Tools are available here for more information <a href="https://github.com/antimatter-studios/docker-dev-tools">https://github.com/antimatter-studios/docker-dev-tools</a></p>
+        
     </article>
 
     <footer>

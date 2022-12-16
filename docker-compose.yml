@@ -14,7 +14,6 @@ services:
       - ./html:/etc/nginx/html
       # DEV MODE: uncomment this to let you edit the entire app directory on the fly
       - ./:/app
-      # DEV MODE: BUT! After each update, you need to run docker exec -it docker-proxy /app/copy-template.sh
     ports:
       - "80:80"
       - "443:443"
