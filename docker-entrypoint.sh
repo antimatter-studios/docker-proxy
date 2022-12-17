@@ -7,8 +7,8 @@ set -e
 # copy the system resolvers to the nginx configuration
 /app/scripts/resolvers.sh
 
-# Start the container with the default empty configuration
-cp /app/default.conf /etc/nginx/conf.d/default.conf
+# reset the configuration back to the default empty configuration
+/app/scripts/reset.sh
 
 echo "Running '$@'"
 exec "$@"
