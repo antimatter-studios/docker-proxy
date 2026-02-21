@@ -10,5 +10,12 @@ set -e
 # reset the configuration back to the default empty configuration
 /app/scripts/reset.sh
 
+# Ensure the socket directory exists
+mkdir -p /var/run/proxy
+
+# Start the management server in the background
+echo "Starting management server..."
+/usr/local/bin/management &
+
 echo "Running '$@'"
 exec "$@"

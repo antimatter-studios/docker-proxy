@@ -43,42 +43,43 @@ include /etc/nginx/proxy.conf;
 server {
 	server_name _;
 	server_tokens off;
-	
+
 	listen 80;
-	
+
 	access_log /var/log/nginx/access.log main;
 
-	<% for(const index in errorPageData) { %>
-	add_header x-proxy-upstream-<%=+(index)+1%> "<%=errorPageData[index]%>";
-	<% } %>
-	
+	{% for data in ErrorPageData %}
+	add_header x-proxy-upstream-{{ forloop.Counter }} "{{ data }}";
+	{% endfor %}
+
 	root html;
     index 503.html;
 }
 
-<% for(const server of serverList) { %>
+{% for server in ServerList %}
 server {
-	server_name <%=server.host%>;
+	server_name {{ server.Host }};
 	listen 80;
 	access_log /var/log/nginx/access.log vhost;
 
-	<% for(const location of server.locations) { %>
-	<% const regex = location.pathIsRegex ? "~" : "" %>
-	location <%=regex%> "<%=location.path%>" {
-		proxy_pass <%=location.protocol%>://<%=location.upstream%>;
+	{% for location in server.Locations %}
+	{% if location.PathIsRegex %}location ~ "{{ location.Path }}" {
+	{% else %}location "{{ location.Path }}" {
+	{% endif %}
+		proxy_pass {{ location.Protocol }}://{{ location.Upstream }};
 	}
-	<% } %>
+	{% endfor %}
 }
-<% } %>
+{% endfor %}
 
-<% for(const upstream of upstreamList) { %>
-upstream <%=upstream.name%> {
-	<% for(const network of upstream.networks) { %>
-	# using network '<%=network.name%>'
-	server <%=network.ipAddress%>:<%=network.port%>;
-	<% } %>
+{% for upstream in UpstreamList %}
+upstream {{ upstream.Name }} {
+	{% for network in upstream.Networks %}
+	# using network '{{ network.Name }}'
+	server {{ network.IPAddress }}:{{ network.Port }};
+	{% endfor %}
 
-	# Fallback entry for container '<%=upstream.name%>'
+	# Fallback entry for container '{{ upstream.Name }}'
 	server 127.0.0.1 down;
 }
-<% } %> 
+{% endfor %}

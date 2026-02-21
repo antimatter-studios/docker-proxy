@@ -1,3 +1,10 @@
+FROM golang:1.24-alpine AS builder
+WORKDIR /build
+COPY go.mod ./
+RUN go mod download
+COPY cmd/ cmd/
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /management ./cmd/management
+
 FROM nginx:alpine
 LABEL maintainer="Chris Thomas <chris.alex.thomas@gmail.com> (@chrisalexthomas)"
 
@@ -18,12 +25,14 @@ COPY html /etc/nginx/html
 COPY . /app
 WORKDIR /app/
 
+COPY --from=builder /management /usr/local/bin/management
+
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
 RUN chmod +x /app/scripts/*.sh
 
-VOLUME ["/etc/nginx/certs", "/etc/nginx/dhparam"]
+VOLUME ["/etc/nginx/certs", "/etc/nginx/dhparam", "/var/run/proxy"]
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
