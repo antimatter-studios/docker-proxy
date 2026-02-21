@@ -33,7 +33,9 @@ function processHeader(key, value) {
 
     const template = document.querySelector('#upstream-template');
     const clone = template.content.cloneNode(true);
-    clone.querySelector('.url').textContent = url;
+    const link = clone.querySelector('.url a');
+    link.href = url;
+    link.textContent = url;
     clone.querySelector('.container').textContent = json.container;
 
     return clone;
