@@ -1,9 +1,25 @@
 # docker-proxy
-A docker monitoring nginx based reverse proxy which self configures servers and upstreams based on docker container configurations
 
-The project started as a fork of the popular nginx-proxy project. But has since diverged so much that the goal now is to eventually reach feature parity with the original project whilst superceding it
+`docker-proxy` is an NGINX-based reverse proxy designed for local Docker development.
 
-Below is the original README
+Unlike the original `nginx-proxy` architecture (where the proxy container often has direct access to the Docker socket), this project is moving toward a split model:
+
+- The **proxy** container runs NGINX and exposes ports `80` and `443`.
+- A separate companion container (**docker-config-gen**) watches Docker events via the Docker socket and communicates with the proxy over a **management Unix socket** on a shared Docker volume.
+
+## Docker Compose (development)
+
+This repo includes a `docker-compose.yml` intended for development. It mounts:
+
+- `management:/var/run/proxy` (shared management socket volume)
+- `certs:/etc/nginx/certs` (TLS cert storage)
+
+`docker-config-gen` should be run from its own repository and share the same `management`/`certs` volumes.
+
+## Legacy upstream README (historical)
+
+The remainder of this file contains the original upstream `nginx-proxy` README and is kept for reference. It does not fully reflect the current direction of this project.
+
 =========================================
 
 [![Test](https://github.com/nginx-proxy/nginx-proxy/actions/workflows/test.yml/badge.svg)](https://github.com/nginx-proxy/nginx-proxy/actions/workflows/test.yml)
