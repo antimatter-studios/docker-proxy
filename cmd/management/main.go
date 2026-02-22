@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -15,7 +16,9 @@ const (
 	defaultSocketPath = "/var/run/proxy/management.sock"
 	templatePath      = "/app/nginx.template"
 	configPath        = "/etc/nginx/conf.d/default.conf"
+	streamConfigPath  = "/etc/nginx/stream.d/default.conf"
 	defaultConfigPath = "/app/default.conf"
+	streamDelimiter   = "### STREAM_CONFIG ###"
 )
 
 func main() {
@@ -86,13 +89,30 @@ func handlePostConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body = defaultData
+
+		// Remove stream config on reset
+		os.Remove(streamConfigPath)
 	} else {
 		log.Println("Writing new configuration")
 	}
 
-	if err := os.WriteFile(configPath, body, 0644); err != nil {
-		http.Error(w, "Failed to write config: "+err.Error(), http.StatusInternalServerError)
+	// Split HTTP and stream config on the delimiter
+	httpConfig, streamConfig := splitConfig(string(body))
+
+	if err := os.WriteFile(configPath, []byte(httpConfig), 0644); err != nil {
+		http.Error(w, "Failed to write HTTP config: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Write or remove stream config
+	if streamConfig != "" {
+		log.Println("Writing stream configuration")
+		if err := os.WriteFile(streamConfigPath, []byte(streamConfig), 0644); err != nil {
+			http.Error(w, "Failed to write stream config: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		os.Remove(streamConfigPath)
 	}
 
 	// Validate config before reloading
@@ -117,4 +137,21 @@ func handlePostConfig(w http.ResponseWriter, r *http.Request) {
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok\n"))
+}
+
+// splitConfig separates the rendered template output into HTTP and stream
+// portions using the well-known delimiter. Returns (httpConfig, streamConfig).
+func splitConfig(config string) (string, string) {
+	parts := strings.SplitN(config, streamDelimiter, 2)
+	httpConfig := strings.TrimSpace(parts[0]) + "\n"
+
+	streamConfig := ""
+	if len(parts) > 1 {
+		streamConfig = strings.TrimSpace(parts[1])
+		if streamConfig != "" {
+			streamConfig += "\n"
+		}
+	}
+
+	return httpConfig, streamConfig
 }

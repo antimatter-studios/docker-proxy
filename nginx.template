@@ -100,3 +100,51 @@ upstream {{ upstream.Name }} {
 	server 127.0.0.1 down;
 }
 {% endfor %}
+
+### STREAM_CONFIG ###
+
+{% if StreamPortList %}
+log_format stream_log '$remote_addr [$time_local] '
+                      '$protocol $status $bytes_sent $bytes_received '
+                      '$session_time "$upstream_addr" '
+                      '"$ssl_preread_server_name"';
+
+access_log /var/log/nginx/stream_access.log stream_log;
+
+{% for port in StreamPortList %}
+{% if port.HasSNI %}
+# SNI-based routing for port {{ port.ListenPort }}
+map $ssl_preread_server_name $stream_backend_{{ port.ListenPort }} {
+	{% for entry in port.SNIEntries %}
+	{{ entry.Host }} {{ entry.Upstream }};
+	{% endfor %}
+	default {{ port.DefaultUpstream }};
+}
+
+server {
+	listen {{ port.ListenPort }}{% if port.Protocol == "udp" %} udp{% endif %};
+	ssl_preread on;
+	proxy_pass $stream_backend_{{ port.ListenPort }};
+	proxy_timeout 300s;
+	proxy_connect_timeout 10s;
+}
+{% else %}
+# Port-based routing for port {{ port.ListenPort }}
+server {
+	listen {{ port.ListenPort }}{% if port.Protocol == "udp" %} udp{% endif %};
+	proxy_pass {{ port.DefaultUpstream }};
+	proxy_timeout 300s;
+	proxy_connect_timeout 10s;
+}
+{% endif %}
+{% endfor %}
+
+{% for upstream in StreamUpstreamList %}
+upstream {{ upstream.Name }} {
+	{% for network in upstream.Networks %}
+	# using network '{{ network.Name }}'
+	server {{ network.IPAddress }}:{{ network.Port }};
+	{% endfor %}
+}
+{% endfor %}
+{% endif %}

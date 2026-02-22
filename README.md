@@ -16,6 +16,90 @@ This repo includes a `docker-compose.yml` intended for development. It mounts:
 
 `docker-config-gen` should be run from its own repository and share the same `management`/`certs` volumes.
 
+## Landing page
+
+When you visit `ddt.localhost` (or whatever hostname the proxy listens on), a landing page shows all registered services discovered from the `x-proxy-upstream-*` response headers. If no services are registered yet, the page displays a helpful empty state.
+
+## Container configuration
+
+Containers opt into proxying via **Docker labels** (preferred) or **environment variables** (legacy).
+
+### HTTP reverse proxying (labels)
+
+```yaml
+labels:
+  docker-proxy.myapp.host: myapp.localhost
+  docker-proxy.myapp.port: "3000"        # default: 80
+  docker-proxy.myapp.protocol: http      # default: http (also: https)
+  docker-proxy.myapp.path: /             # default: /
+```
+
+Multiple groups per container are supported — use different group names:
+
+```yaml
+labels:
+  docker-proxy.api.host: api.example.localhost
+  docker-proxy.api.port: "8080"
+  docker-proxy.web.host: web.example.localhost
+  docker-proxy.web.port: "3000"
+```
+
+### HTTP reverse proxying (environment variables — legacy)
+
+```yaml
+environment:
+  VIRTUAL_HOST: myapp.localhost
+  VIRTUAL_PORT: "3000"
+  VIRTUAL_PROTO: http
+  VIRTUAL_PATH: /
+```
+
+### TCP/UDP stream proxying
+
+For raw TCP or UDP traffic (databases, mail servers, game servers, etc.), use the `proto` label instead of `host`:
+
+```yaml
+labels:
+  docker-proxy.db.proto: tcp
+  docker-proxy.db.port: "5432"           # container port
+  docker-proxy.db.listen: "5432"         # proxy listen port (default: same as port)
+```
+
+When TLS clients connect, nginx uses **SNI** (Server Name Indication) to route by hostname. Add a `host` label to enable SNI-based routing on a shared port:
+
+```yaml
+labels:
+  docker-proxy.mail.proto: tcp
+  docker-proxy.mail.port: "993"
+  docker-proxy.mail.listen: "993"
+  docker-proxy.mail.host: mail.example.com   # enables SNI routing
+```
+
+Multiple containers can share the same listen port when each specifies a different `host` — nginx will route based on the TLS SNI hostname. Non-TLS connections on the same port are forwarded to the default upstream (the first container registered for that port).
+
+UDP is also supported:
+
+```yaml
+labels:
+  docker-proxy.dns.proto: udp
+  docker-proxy.dns.port: "53"
+  docker-proxy.dns.listen: "53"
+```
+
+### Network requirements
+
+The proxy container must be connected to the same Docker network as any container it proxies. Use `docker network connect` or shared networks in your compose file.
+
+## Architecture
+
+The proxy container runs NGINX and a **management server** (`/usr/local/bin/management`) that listens on a Unix domain socket at `/var/run/proxy/management.sock`.
+
+The companion **docker-config-gen** container watches Docker events, inspects container labels/env, renders an nginx configuration from a Pongo2 template, and POSTs it to the management socket. The management server:
+
+1. Splits the rendered config into HTTP (`/etc/nginx/conf.d/default.conf`) and stream (`/etc/nginx/stream.d/default.conf`) sections using the `### STREAM_CONFIG ###` delimiter
+2. Validates the config with `nginx -t`
+3. Reloads nginx with `nginx -s reload`
+
 ## Legacy upstream README (historical)
 
 The remainder of this file contains the original upstream `nginx-proxy` README and is kept for reference. It does not fully reflect the current direction of this project.

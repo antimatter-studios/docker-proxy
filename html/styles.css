@@ -98,3 +98,30 @@ footer {
 a {
     color: #000000;
 }
+
+code {
+    background-color: #dedede;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.3rem;
+}
+
+#service-count {
+    font-size: 1.6rem;
+    font-weight: bold;
+}
+
+#no-services {
+    font-size: 1.6rem;
+    padding: 2rem;
+    text-align: center;
+    color: #666666;
+}
+
+details {
+    margin-top: 2rem;
+}
+
+details summary {
+    cursor: pointer;
+    font-size: 1.6rem;
+}

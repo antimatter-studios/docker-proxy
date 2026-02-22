@@ -16,7 +16,9 @@ RUN apk add --no-cache --virtual .run-deps \
 # Configure Nginx and apply fix for very long server names
 RUN echo "Writing custom nginx configuration values" \
  && sed -i 's/worker_processes  1/worker_processes  auto/' /etc/nginx/nginx.conf \
- && sed -i 's/worker_connections  1024/worker_connections  10240/' /etc/nginx/nginx.conf
+ && sed -i 's/worker_connections  1024/worker_connections  10240/' /etc/nginx/nginx.conf \
+ && mkdir -p /etc/nginx/stream.d \
+ && printf '\nstream {\n    include /etc/nginx/stream.d/*.conf;\n}\n' >> /etc/nginx/nginx.conf
 
 COPY network_internal.conf /etc/nginx/
 COPY proxy.conf /etc/nginx/
