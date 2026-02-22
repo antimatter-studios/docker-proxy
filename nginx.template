@@ -39,12 +39,29 @@ access_log off;
 
 include /etc/nginx/proxy.conf;
 
-# This is just an invalid/default/catchall value which will never trigger on a real hostname.
+# Landing page for the proxy's own hostname.
+server {
+	server_name ddt.localhost;
+	server_tokens off;
+
+	listen 80;
+
+	access_log /var/log/nginx/access.log vhost;
+
+	{% for data in ErrorPageData %}
+	add_header x-proxy-upstream-{{ forloop.Counter }} "{{ data }}";
+	{% endfor %}
+
+	root html;
+	index 200.html;
+}
+
+# Catch-all for unrecognised hostnames.
 server {
 	server_name _;
 	server_tokens off;
 
-	listen 80;
+	listen 80 default_server;
 
 	access_log /var/log/nginx/access.log main;
 
@@ -53,7 +70,7 @@ server {
 	{% endfor %}
 
 	root html;
-    index 503.html;
+	index 503.html;
 }
 
 {% for server in ServerList %}
