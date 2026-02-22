@@ -55,7 +55,7 @@ pre.allow-format {
     margin: 1rem 0;
 }
 
-#upstream-list {
+.upstream-list {
     width: 100%;
     border-collapse: collapse;
     margin: 1rem 0;
@@ -63,28 +63,28 @@ pre.allow-format {
     box-shadow: 0 0 20px rgba(0, 0, 0, 0.15);
 }
 
-#upstream-list th, 
-#upstream-list td {
+.upstream-list th, 
+.upstream-list td {
     padding: 12px 15px;
 }
 
-#upstream-list thead tr {
+.upstream-list thead tr {
     background-color: var(--table-header);
     color: var(--table-header-text);
     text-align: left;
     border-radius: 1rem 1rem 0 0;
 }
 
-#upstream-list tbody tr {
+.upstream-list tbody tr {
     border-bottom: thin solid #dddddd;
     font-size: 1.5rem;
 }
 
-#upstream-list tbody tr:nth-of-type(even) {
+.upstream-list tbody tr:nth-of-type(even) {
     background-color: #f3f3f3;
 }
 
-#upstream-list tbody tr:last-of-type {
+.upstream-list tbody tr:last-of-type {
     border-bottom: thick solid var(--orange);
 }
 

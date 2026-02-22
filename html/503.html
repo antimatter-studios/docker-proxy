@@ -16,19 +16,37 @@
     </header>
 
     <article>
-        <h3>Registered Upstreams:</h3>
-        <table id="upstream-list">
-            <thead class="orange-highlight">
-                <tr>
-                    <th>URL</th>
-                    <th>Container Name</th>
-                </tr>
-            </thead>
+        <div id="http-section">
+            <h3>HTTP(S) Upstreams</h3>
+            <table id="http-upstream-list" class="upstream-list">
+                <thead class="orange-highlight">
+                    <tr>
+                        <th>URL</th>
+                        <th>Container Name</th>
+                    </tr>
+                </thead>
 
-            <tbody>
+                <tbody>
 
-            </tbody>
-        </table>
+                </tbody>
+            </table>
+        </div>
+
+        <div id="stream-section" style="margin-top: 2em;">
+            <h3>TCP/UDP Upstreams</h3>
+            <table id="stream-upstream-list" class="upstream-list">
+                <thead class="orange-highlight">
+                    <tr>
+                        <th>URL</th>
+                        <th>Container Name</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                </tbody>
+            </table>
+        </div>
     </article>
 
     <footer>

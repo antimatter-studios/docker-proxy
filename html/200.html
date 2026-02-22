@@ -18,18 +18,37 @@
     <article>
         <p id="service-count"></p>
 
-        <table id="upstream-list">
-            <thead class="orange-highlight">
-                <tr>
-                    <th>URL</th>
-                    <th>Container Name</th>
-                </tr>
-            </thead>
+        <div id="http-section">
+            <h3>HTTP(S) Services</h3>
+            <table id="http-upstream-list" class="upstream-list">
+                <thead class="orange-highlight">
+                    <tr>
+                        <th>URL</th>
+                        <th>Container Name</th>
+                    </tr>
+                </thead>
 
-            <tbody>
+                <tbody>
 
-            </tbody>
-        </table>
+                </tbody>
+            </table>
+        </div>
+
+        <div id="stream-section">
+            <h3>TCP/UDP Services</h3>
+            <table id="stream-upstream-list" class="upstream-list">
+                <thead class="orange-highlight">
+                    <tr>
+                        <th>URL</th>
+                        <th>Container Name</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                </tbody>
+            </table>
+        </div>
 
         <p id="no-services" style="display:none">
             No services are currently registered with the proxy.<br>

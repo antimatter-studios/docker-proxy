@@ -3,23 +3,57 @@
     const headerList = response.headers;
 
     const keys = filterHeaders(headerList);
+    const allUpstreams = parseUpstreams(keys, headerList);
 
-    if (keys.length === 0) {
-        document.getElementById('upstream-list').style.display = 'none';
+    const httpUpstreams = allUpstreams.filter(u => {
+        const json = JSON.parse(atob(u.value));
+        return (json.protocol === 'http' || json.protocol === 'https') &&
+               !json.container.startsWith('docker-proxy-sidecar-');
+    });
+    const streamUpstreams = allUpstreams.filter(u => {
+        const json = JSON.parse(atob(u.value));
+        return (json.protocol === 'tcp' || json.protocol === 'udp') &&
+               !json.container.startsWith('docker-proxy-sidecar-');
+    });
+
+    const totalServices = httpUpstreams.length + streamUpstreams.length;
+
+    if (totalServices === 0) {
+        document.getElementById('http-section').style.display = 'none';
+        document.getElementById('stream-section').style.display = 'none';
         document.getElementById('no-services').style.display = 'block';
         document.getElementById('service-count').textContent = 'No services registered';
     } else {
-        const label = keys.length === 1 ? 'service' : 'services';
-        document.getElementById('service-count').textContent = keys.length + ' ' + label + ' registered';
-        populateTable(keys, headerList);
+        const label = totalServices === 1 ? 'service' : 'services';
+        document.getElementById('service-count').textContent = totalServices + ' ' + label + ' registered';
+
+        if (httpUpstreams.length > 0) {
+            populateTable(httpUpstreams, '#http-upstream-list');
+        } else {
+            document.getElementById('http-section').style.display = 'none';
+        }
+
+        if (streamUpstreams.length > 0) {
+            populateTable(streamUpstreams, '#stream-upstream-list');
+        } else {
+            document.getElementById('stream-section').style.display = 'none';
+        }
     }
 })();
 
-function populateTable(keys, headerList) {
-    const parent = document.querySelector('#upstream-list tbody');
-
+function parseUpstreams(keys, headerList) {
+    const upstreams = [];
     for (const key of keys) {
-        const child = processHeader(key, headerList.get(key));
+        upstreams.push({ key: key, value: headerList.get(key) });
+    }
+    return upstreams;
+}
+
+function populateTable(upstreams, tableSelector) {
+    const parent = document.querySelector(tableSelector + ' tbody');
+
+    for (const upstream of upstreams) {
+        const child = processHeader(upstream.key, upstream.value);
         parent.appendChild(child);
     }
 }
