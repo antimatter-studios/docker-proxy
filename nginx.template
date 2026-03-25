@@ -65,12 +65,22 @@ server {
 
 	access_log /var/log/nginx/access.log main;
 
-	{% for data in ErrorPageData %}
-	add_header x-proxy-upstream-{{ forloop.Counter }} "{{ data }}";
-	{% endfor %}
-
+	error_page 503 /503.html;
 	root html;
-	index 503.html;
+
+	location ~* \.(css|js|png|ico)$ {
+	}
+
+	location / {
+		return 503;
+	}
+
+	location = /503.html {
+		{% for data in ErrorPageData %}
+		add_header x-proxy-upstream-{{ forloop.Counter }} "{{ data }}" always;
+		{% endfor %}
+		internal;
+	}
 }
 
 {% for server in ServerList %}
