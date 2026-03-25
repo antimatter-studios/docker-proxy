@@ -1,0 +1,49 @@
+version: '3'
+
+vars:
+  IMAGE: ghcr.io/antimatter-studios/docker-proxy
+  TAG: latest
+  CONTAINER: docker-proxy
+
+tasks:
+  build:
+    desc: Build the Docker image
+    cmds:
+      - docker build -t {{.IMAGE}}:{{.TAG}} .
+
+  run:
+    desc: Run the docker-proxy container
+    deps: [build]
+    cmds:
+      - task: stop
+      - >-
+        docker run -d
+        --name {{.CONTAINER}}
+        --restart always
+        -v {{.USER_WORKING_DIR}}/html:/etc/nginx/html
+        -v {{.USER_WORKING_DIR}}:/app
+        -v docker-proxy-management:/var/run/proxy
+        -v docker-proxy-certs:/etc/nginx/certs
+        -p 80:80
+        -p 443:443
+        {{.IMAGE}}:{{.TAG}}
+
+  stop:
+    desc: Stop and remove the docker-proxy container
+    cmds:
+      - docker rm -f {{.CONTAINER}} 2>/dev/null || true
+
+  logs:
+    desc: Tail container logs
+    cmds:
+      - docker logs -f {{.CONTAINER}}
+
+  shell:
+    desc: Open a shell in the running container
+    cmds:
+      - docker exec -it {{.CONTAINER}} sh
+
+  push:
+    desc: Push the Docker image to the registry
+    cmds:
+      - docker push {{.IMAGE}}:{{.TAG}}
