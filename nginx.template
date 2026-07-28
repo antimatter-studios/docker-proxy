@@ -37,6 +37,13 @@ log_format vhost '$host $remote_addr - $remote_user [$time_local] '
 
 access_log off;
 
+# Upload limit, proxy-wide. nginx defaults to 1m, which silently turns any larger
+# upload into a 413 that looks like an application fault. Supplied by the config
+# generator (PROXY_MAX_BODY_SIZE, default 512m) and overridable per location below —
+# this used to arrive as a file the orchestrator copied in, which was dropped when
+# configuration generation moved to the generator.
+client_max_body_size {{ MaxBodySize }};
+
 include /etc/nginx/proxy.conf;
 
 # Landing page for the proxy's own hostname.
@@ -93,7 +100,8 @@ server {
 	{% if location.PathIsRegex %}location ~ "{{ location.Path }}" {
 	{% else %}location "{{ location.Path }}" {
 	{% endif %}
-		proxy_pass {{ location.Protocol }}://{{ location.Upstream }};
+		{% if location.MaxBodySize %}client_max_body_size {{ location.MaxBodySize }};
+		{% endif %}proxy_pass {{ location.Protocol }}://{{ location.Upstream }};
 	}
 	{% endfor %}
 }
