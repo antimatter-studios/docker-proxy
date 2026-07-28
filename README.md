@@ -32,6 +32,7 @@ labels:
   docker-proxy.myapp.port: "3000"        # default: 80
   docker-proxy.myapp.protocol: http      # default: http (also: https)
   docker-proxy.myapp.path: /             # default: /
+  docker-proxy.myapp.max_body_size: 2g   # optional: upload limit for this location
 ```
 
 Multiple groups per container are supported — use different group names:
@@ -54,6 +55,8 @@ environment:
   VIRTUAL_PATH: /
 ```
 
+Upload size is capped proxy-wide by `PROXY_MAX_BODY_SIZE` (default `512m`), since nginx's own default of `1m` turns a larger upload into a `413` that reads as an application fault. `max_body_size` on a service raises or lowers it for that location alone.
+
 ### TCP/UDP stream proxying
 
 For raw TCP or UDP traffic (databases, mail servers, game servers, etc.), use the `proto` label instead of `host`:
@@ -65,17 +68,25 @@ labels:
   docker-proxy.db.listen: "5432"         # proxy listen port (default: same as port)
 ```
 
-When TLS clients connect, nginx uses **SNI** (Server Name Indication) to route by hostname. Add a `host` label to enable SNI-based routing on a shared port:
+That forwards the port straight through to the container. Nothing inspects the traffic, so it works for any protocol — including the ones where the **server speaks first**, like SMTP, IMAP and POP3 in plaintext.
+
+For a port carrying **TLS**, add `ssl` to route by hostname. nginx then reads the SNI name from the client's handshake, which lets several containers share one listen port:
 
 ```yaml
 labels:
   docker-proxy.mail.proto: tcp
   docker-proxy.mail.port: "993"
   docker-proxy.mail.listen: "993"
-  docker-proxy.mail.host: mail.example.com   # enables SNI routing
+  docker-proxy.mail.host: mail.example.com   # matched against SNI
+  docker-proxy.mail.ssl: "true"              # enables SNI routing
 ```
 
-Multiple containers can share the same listen port when each specifies a different `host` — nginx will route based on the TLS SNI hostname. Non-TLS connections on the same port are forwarded to the default upstream (the first container registered for that port).
+`ssl` is off by default, and that default matters: it turns on nginx's `ssl_preread`, which waits for a client TLS handshake before forwarding. On a plaintext protocol the server is waiting to send its greeting at the same moment, so the connection hangs — enabling it everywhere made 25, 143 and 110 unusable while 465, 993 and 995 worked.
+
+Consequences worth knowing:
+
+- **Sharing a listen port requires TLS.** Without a handshake there is no hostname to route on, so a non-`ssl` port serves exactly one upstream. A second container declaring the same non-TLS port is logged and ignored rather than silently taking over.
+- A `host` label on a non-`ssl` port is accepted but cannot influence routing, for the same reason.
 
 UDP is also supported:
 
