@@ -1,0 +1,136 @@
+name: CI
+
+# Runs on pull requests, which nothing did before: the only workflow here builds and
+# pushes on main, so a change was published before anything had checked it.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  test:
+    name: Management server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          set -euo pipefail
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt would change:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test -race -count=1 ./...
+
+  image:
+    name: Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Plain docker build rather than an action: the runner already has buildx, and
+      # this job only needs a local image, never a registry.
+      - name: Build
+        run: docker build -t docker-proxy:ci .
+
+      # Everything below is the point of this job. The unit tests cover the management
+      # server's logic; these check the thing that actually ships — nginx, its baked-in
+      # configuration, and the entrypoint that starts them.
+      - name: The shipped configuration must load
+        run: docker run --rm docker-proxy:ci nginx -t
+
+      - name: Start the container
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/proxysock"
+          docker run -d --name proxy \
+            -v "${RUNNER_TEMP}/proxysock:/var/run/proxy" \
+            docker-proxy:ci
+          # The entrypoint generates dhparam before nginx starts, which is not instant.
+          for _ in $(seq 1 60); do
+            if curl -fsS --unix-socket "${RUNNER_TEMP}/proxysock/management.sock" \
+                 http://localhost/health >/dev/null 2>&1; then
+              echo "management server up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "management server never came up" >&2
+          docker logs proxy >&2
+          exit 1
+
+      - name: The template must be served
+        run: |
+          set -euo pipefail
+          body=$(curl -fsS --unix-socket "${RUNNER_TEMP}/proxysock/management.sock" \
+                   http://localhost/template)
+          # The generator renders this with pongo2; if it is not a template, every
+          # config it produces afterwards is wrong.
+          echo "$body" | grep -q '{%' || {
+            echo "GET /template returned something that is not a template:" >&2
+            echo "$body" | head -20 >&2
+            exit 1
+          }
+
+      - name: A valid configuration is accepted and loaded
+        run: |
+          set -euo pipefail
+          printf 'server { listen 8081; location / { return 200 "ci-ok"; } }\n' > valid.conf
+          code=$(curl -sS -o /tmp/out -w '%{http_code}' \
+            --unix-socket "${RUNNER_TEMP}/proxysock/management.sock" \
+            -X POST --data-binary @valid.conf http://localhost/config)
+          [ "$code" = 200 ] || { echo "POST /config returned ${code}"; cat /tmp/out; exit 1; }
+          docker exec proxy nginx -t
+          docker exec proxy grep -q 'listen 8081' /etc/nginx/conf.d/default.conf
+
+      # The regression this repository actually had: an invalid config was refused for
+      # the RUNNING nginx but left on disk, so the next restart loaded it and nginx did
+      # not come up at all. Rejecting it is only half the requirement; the other half is
+      # that what remains on disk is still loadable.
+      - name: An invalid configuration is rejected and not left behind
+        run: |
+          set -euo pipefail
+          printf 'this is not valid nginx\n' > bad.conf
+          code=$(curl -sS -o /tmp/out -w '%{http_code}' \
+            --unix-socket "${RUNNER_TEMP}/proxysock/management.sock" \
+            -X POST --data-binary @bad.conf http://localhost/config)
+          [ "$code" = 400 ] || { echo "an invalid config was not rejected: ${code}"; cat /tmp/out; exit 1; }
+
+          # The previous configuration must still be the one on disk...
+          docker exec proxy grep -q 'listen 8081' /etc/nginx/conf.d/default.conf || {
+            echo "the rejected config was left on disk:" >&2
+            docker exec proxy cat /etc/nginx/conf.d/default.conf >&2
+            exit 1
+          }
+          # ...and it must still load, which is what a restart would depend on.
+          docker exec proxy nginx -t
+
+      - name: The container must still be running
+        run: |
+          set -euo pipefail
+          [ "$(docker inspect -f '{{.State.Running}}' proxy)" = true ] || {
+            docker logs proxy >&2
+            exit 1
+          }
+
+      - name: Logs
+        if: always()
+        run: docker logs proxy 2>&1 | tail -40 || true
