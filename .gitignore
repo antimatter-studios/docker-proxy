@@ -3,4 +3,8 @@
 .idea/
 *.code-workspace
 .DS_Store
-management
+
+# The built management binary, at the repository root only. Unanchored, this pattern
+# also matched cmd/management/ — so every new file in that directory was ignored, and
+# `git add` of one printed a hint that is easy to read as "you do not want this".
+/management

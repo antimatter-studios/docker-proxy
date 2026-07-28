@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -99,26 +100,8 @@ func handlePostConfig(w http.ResponseWriter, r *http.Request) {
 	// Split HTTP and stream config on the delimiter
 	httpConfig, streamConfig := splitConfig(string(body))
 
-	if err := os.WriteFile(configPath, []byte(httpConfig), 0644); err != nil {
-		http.Error(w, "Failed to write HTTP config: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Write or remove stream config
-	if streamConfig != "" {
-		log.Println("Writing stream configuration")
-		if err := os.WriteFile(streamConfigPath, []byte(streamConfig), 0644); err != nil {
-			http.Error(w, "Failed to write stream config: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-	} else {
-		os.Remove(streamConfigPath)
-	}
-
-	// Validate config before reloading
-	testCmd := exec.Command("nginx", "-t")
-	if testOutput, err := testCmd.CombinedOutput(); err != nil {
-		http.Error(w, "Config validation failed: "+err.Error()+"\n"+string(testOutput), http.StatusBadRequest)
+	if status, err := applyConfig(configPath, streamConfigPath, httpConfig, streamConfig, nginxTest); err != nil {
+		http.Error(w, err.Error(), status)
 		return
 	}
 
@@ -132,6 +115,63 @@ func handlePostConfig(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Configuration updated and nginx reloaded\n"))
+}
+
+// nginxTest is the validation applyConfig uses in production: nginx checking its own
+// configuration, which is the only thing that can say authoritatively whether it loads.
+func nginxTest() ([]byte, error) {
+	return exec.Command("nginx", "-t").CombinedOutput()
+}
+
+// applyConfig writes the configuration to disk, validates it, and puts back whatever was
+// there before if validation fails.
+//
+// Refusing to reload protects the RUNNING nginx, but the rejected files used to stay on
+// disk — so the next container restart loaded them and nginx would not come up at all.
+// The proxy was then down until someone worked out that a config posted hours earlier had
+// been rejected. A config bad enough to refuse is bad enough not to leave behind.
+//
+// Returns the HTTP status to report alongside the error, or 0 and nil on success.
+func applyConfig(httpPath, streamPath, httpConfig, streamConfig string, validate func() ([]byte, error)) (int, error) {
+	prevHTTP, prevHTTPErr := os.ReadFile(httpPath)
+	prevStream, prevStreamErr := os.ReadFile(streamPath)
+	restore := func() {
+		// Absent before means absent after. Writing nothing back would leave the
+		// rejected file exactly where it was, which is the bug this prevents.
+		if prevHTTPErr == nil {
+			_ = os.WriteFile(httpPath, prevHTTP, 0644)
+		} else {
+			_ = os.Remove(httpPath)
+		}
+		if prevStreamErr == nil {
+			_ = os.WriteFile(streamPath, prevStream, 0644)
+		} else {
+			_ = os.Remove(streamPath)
+		}
+	}
+
+	if err := os.WriteFile(httpPath, []byte(httpConfig), 0644); err != nil {
+		restore()
+		return http.StatusInternalServerError, fmt.Errorf("failed to write HTTP config: %w", err)
+	}
+
+	if streamConfig != "" {
+		log.Println("Writing stream configuration")
+		if err := os.WriteFile(streamPath, []byte(streamConfig), 0644); err != nil {
+			restore()
+			return http.StatusInternalServerError, fmt.Errorf("failed to write stream config: %w", err)
+		}
+	} else {
+		os.Remove(streamPath)
+	}
+
+	if out, err := validate(); err != nil {
+		restore()
+		log.Printf("Config validation failed, restored the previous configuration: %v", err)
+		return http.StatusBadRequest, fmt.Errorf("config validation failed: %w\n%s", err, out)
+	}
+
+	return 0, nil
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
