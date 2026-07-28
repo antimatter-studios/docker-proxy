@@ -42,7 +42,12 @@ access_log off;
 # generator (PROXY_MAX_BODY_SIZE, default 512m) and overridable per location below —
 # this used to arrive as a file the orchestrator copied in, which was dropped when
 # configuration generation moved to the generator.
-client_max_body_size {{ MaxBodySize }};
+#
+# Guarded, because the image tags are floating: a NEWER template can be rendered by an
+# OLDER generator that knows nothing of MaxBodySize, and an unguarded directive would
+# then emit the directive with an empty value — an nginx syntax error, so the proxy
+# would not start at all. Omitted instead, which falls back to nginx's own default.
+{% if MaxBodySize %}client_max_body_size {{ MaxBodySize }};{% endif %}
 
 include /etc/nginx/proxy.conf;
 
