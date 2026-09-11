@@ -1,0 +1,54 @@
+name: Merge on green
+
+# Squash-merges a pull request as soon as CI passes on it, then publishes the image.
+#
+# The merge is made with this workflow's token, and GitHub starts no workflows for
+# pushes made with that token, so the Docker workflow would never run for the merged
+# commit. It is started here explicitly instead (workflow_dispatch is the exception).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  merge:
+    name: Merge
+    # A successful CI run on a pull request from this repository (Dependabot's
+    # included). Pull requests from forks are left for a person.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge the pull request
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.event.repository.default_branch }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          pr=$(gh pr list -R "$REPO" --head "$BRANCH" --state open \
+            --json number,isDraft,baseRefName,headRefOid \
+            --jq '.[] | select(.headRefOid == env.HEAD_SHA and (.isDraft | not) and .baseRefName == env.BASE) | .number' | head -1)
+          if [ -z "$pr" ]; then
+            echo "No open, ready pull request into $BASE at $HEAD_SHA."
+            exit 0
+          fi
+          # Only the commit CI just passed, never one pushed since.
+          gh pr merge "$pr" -R "$REPO" --squash --delete-branch --match-head-commit "$HEAD_SHA"
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the image
+        if: steps.merge.outputs.merged == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run docker.yml -R "${{ github.repository }}" --ref "${{ github.event.repository.default_branch }}"

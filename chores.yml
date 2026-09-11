@@ -1,0 +1,119 @@
+version: '3'
+
+# The everyday commands for this repo, run with `chore <name>`.
+#
+# ddt runs this image as its reverse proxy (the ddt-proxy container), beside
+# docker-config-gen. To try a local build with ddt, run `chore image:build`, then
+# `ddt proxy docker-image ghcr.io/antimatter-studios/docker-proxy:dev` and
+# `ddt proxy restart`.
+
+vars:
+  IMAGE: '{{.IMAGE | default "ghcr.io/antimatter-studios/docker-proxy:dev"}}'
+
+tasks:
+  default:
+    cmds:
+      - chore --list
+
+  test:
+    desc: Run the management server's unit tests
+    cmds:
+      - go test -race -count=1 ./...
+
+  image:build:
+    desc: Build the Docker image
+    cmds:
+      - docker build -t {{.IMAGE}} .
+
+  image:smoke:
+    desc: Build the image and check what ships in it (nginx, its configuration, the entrypoint, the management server and HTTPS)
+    deps: ['image:build']
+    vars:
+      # Named per run, so two runs at once never touch each other's container or volume.
+      RUN:
+        sh: echo "docker-proxy-smoke-$(date +%s)-$$"
+    cmds:
+      - defer: 'docker rm -f {{.RUN}} >/dev/null 2>&1; docker volume rm {{.RUN}} >/dev/null 2>&1; rm -rf "${TMPDIR:-/tmp}/{{.RUN}}"'
+      # The unit tests cover the management server's logic; this checks the thing that
+      # ships. The management socket is reached from inside the container, and the
+      # certificates are made inside the image, so it runs the same on a Mac as in CI.
+      - |
+        set -e
+        run={{.RUN}}
+        work="${TMPDIR:-/tmp}/$run"
+        mkdir -p "$work"
+        fail() { echo "FAIL: $*" >&2; docker logs "$run" 2>&1 | tail -40 >&2; exit 1; }
+        mgmt() { docker exec -i "$run" curl -sS -o /tmp/out -w '%{http_code}' --unix-socket /var/run/proxy/management.sock "$@"; }
+
+        echo "- the shipped configuration loads"
+        docker run --rm {{.IMAGE}} nginx -t >/dev/null 2>&1 || fail "nginx -t rejects the shipped configuration"
+
+        echo "- a throwaway CA and host certificate, standing in for what docker-config-gen issues"
+        docker volume create "$run" >/dev/null
+        docker run --rm -v "$run:/certs" --entrypoint sh {{.IMAGE}} -c '
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 \
+            -subj /CN=smoke-ca -keyout /certs/ca.key -out /certs/ca.crt 2>/dev/null &&
+          openssl req -x509 -CA /certs/ca.crt -CAkey /certs/ca.key \
+            -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 \
+            -subj /CN=smoke.localhost -addext subjectAltName=DNS:smoke.localhost \
+            -keyout /certs/smoke.localhost.key -out /certs/smoke.localhost.crt 2>/dev/null'
+        docker run --rm -v "$run:/certs" --entrypoint cat {{.IMAGE}} /certs/ca.crt > "$work/ca.crt"
+
+        echo "- the container starts and its management server answers"
+        docker run -d --name "$run" -v "$run:/etc/nginx/certs:ro" -p 127.0.0.1::443 {{.IMAGE}} >/dev/null
+        # The entrypoint prepares dhparam before nginx starts, which is not instant.
+        up=""
+        for i in $(seq 1 60); do
+          if docker exec "$run" curl -fsS --unix-socket /var/run/proxy/management.sock http://localhost/health >/dev/null 2>&1; then up=1; break; fi
+          sleep 2
+        done
+        [ -n "$up" ] || fail "the management server never came up"
+
+        echo "- the template is served"
+        # The generator renders it with pongo2; if it is not a template, every config
+        # generated from it is wrong.
+        docker exec "$run" curl -fsS --unix-socket /var/run/proxy/management.sock http://localhost/template | grep -q '{%' \
+          || fail "GET /template returned something that is not a template"
+
+        echo "- a valid configuration is accepted and loaded"
+        code=$(printf 'server { listen 8081; location / { return 200 "smoke-ok"; } }\n' | mgmt -X POST --data-binary @- http://localhost/config)
+        [ "$code" = 200 ] || fail "POST /config of a valid configuration returned $code"
+        docker exec "$run" nginx -t >/dev/null 2>&1 || fail "nginx rejects the configuration it accepted"
+        docker exec "$run" grep -q 'listen 8081' /etc/nginx/conf.d/default.conf || fail "the accepted configuration was not written"
+
+        # The regression this repository had: an invalid config was refused for the
+        # RUNNING nginx but left on disk, so the next restart loaded it and nginx did
+        # not come up at all. What remains on disk must still load.
+        echo "- an invalid configuration is rejected, and not left behind"
+        code=$(printf 'this is not valid nginx\n' | mgmt -X POST --data-binary @- http://localhost/config)
+        [ "$code" = 400 ] || fail "an invalid configuration was not rejected ($code)"
+        docker exec "$run" grep -q 'listen 8081' /etc/nginx/conf.d/default.conf || fail "the rejected configuration was left on disk"
+        docker exec "$run" nginx -t >/dev/null 2>&1 || fail "what was left on disk no longer loads"
+
+        # The template side of HTTPS is tested in docker-config-gen, which renders it.
+        # This checks the image: nginx serves a certificate from the certs volume, and
+        # refuses the handshake for a name it has no certificate for.
+        echo "- HTTPS is served from the certs volume, and unknown names are refused"
+        tls='server { server_name _; listen 443 ssl default_server; ssl_reject_handshake on; }
+        server {
+          server_name smoke.localhost;
+          listen 443 ssl;
+          ssl_certificate /etc/nginx/certs/smoke.localhost.crt;
+          ssl_certificate_key /etc/nginx/certs/smoke.localhost.key;
+          location / { return 200 "tls-ok"; }
+        }'
+        code=$(printf '%s\n' "$tls" | mgmt -X POST --data-binary @- http://localhost/config)
+        [ "$code" = 200 ] || fail "POST /config of the HTTPS configuration returned $code"
+        port=$(docker port "$run" 443/tcp | head -1 | sed 's/.*://')
+        # nginx reloads after answering POST /config, so retry until the listener is live.
+        body=$(curl -fsS --retry 10 --retry-delay 1 --retry-all-errors --cacert "$work/ca.crt" \
+          --resolve "smoke.localhost:$port:127.0.0.1" "https://smoke.localhost:$port/") || fail "HTTPS to the host with a certificate failed"
+        [ "$body" = tls-ok ] || fail "unexpected HTTPS body: $body"
+        # curl exits 35 when the handshake itself is refused.
+        rc=0
+        curl -sS -k --resolve "other.localhost:$port:127.0.0.1" "https://other.localhost:$port/" -o /dev/null 2>/dev/null || rc=$?
+        [ "$rc" = 35 ] || fail "a name with no certificate was not refused (curl exit $rc)"
+
+        echo "- the container is still running"
+        [ "$(docker inspect -f '{{`{{.State.Running}}`}}' "$run")" = true ] || fail "the container stopped"
+        echo "image smoke test passed"
