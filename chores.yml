@@ -1,4 +1,5 @@
 version: '3'
+chore_min_version: 0.11.0
 
 # The everyday commands for this repo, run with `chore <name>`.
 #

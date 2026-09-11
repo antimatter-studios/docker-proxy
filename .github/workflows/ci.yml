@@ -8,6 +8,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# A newer commit on the same branch supersedes the run in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -18,6 +23,8 @@ jobs:
   test:
     name: Management server
     runs-on: ubuntu-latest
+    # A hang fails the job instead of holding a runner for six hours.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -43,6 +50,8 @@ jobs:
   image:
     name: Image
     runs-on: ubuntu-latest
+    # A hang fails the job instead of holding a runner for six hours.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -81,6 +90,8 @@ jobs:
     needs: [test, image]
     if: always()
     runs-on: ubuntu-latest
+    # A hang fails the job instead of holding a runner for six hours.
+    timeout-minutes: 20
     steps:
       - run: |
           for r in '${{ needs.test.result }}' '${{ needs.image.result }}'; do
