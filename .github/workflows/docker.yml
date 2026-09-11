@@ -16,11 +16,14 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   registry: ghcr.io
 
-# One publish at a time, in the order they were started, and never cancelled halfway.
-# Each run builds the commit main pointed at when it was started, so the run that
-# finishes last is always the newest and `latest` cannot roll back to an older image.
+# One publish at a time per branch or tag, in the order they were started, and never
+# cancelled halfway. Each run builds the commit its ref pointed at when it was started,
+# so on main the run that finishes last is always the newest and `latest` cannot roll
+# back to an older image. Tags get a group of their own: GitHub keeps only one pending
+# run per group, and a release waiting behind a main build must not be dropped when a
+# newer main build arrives.
 concurrency:
-  group: publish
+  group: publish-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
