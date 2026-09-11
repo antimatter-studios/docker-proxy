@@ -45,6 +45,12 @@ labels:
   docker-proxy.web.port: "3000"
 ```
 
+### HTTPS
+
+Every routed host is also served over HTTPS on `443` once docker-config-gen has issued it a certificate. No label is needed: the host name is the certificate's name. The generator writes each host's certificate and key into the shared `certs` volume and names them in the rendered configuration; a host without one stays HTTP-only. A TLS handshake for a hostname with no certificate is refused, rather than answered with another host's certificate.
+
+`protocol: https` is unrelated: it makes the proxy speak HTTPS to the container, not to the client.
+
 ### HTTP reverse proxying (environment variables — legacy)
 
 ```yaml

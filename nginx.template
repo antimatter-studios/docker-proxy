@@ -95,10 +95,28 @@ server {
 	}
 }
 
+# Catch-all for HTTPS: a hostname with no certificate here has its handshake refused,
+# rather than being answered with some other host's certificate.
+server {
+	server_name _;
+	server_tokens off;
+
+	listen 443 ssl default_server;
+	ssl_reject_handshake on;
+}
+
 {% for server in ServerList %}
 server {
 	server_name {{ server.Host }};
 	listen 80;
+	{% if server.Certificate %}
+	# HTTPS, with the certificate the config generator issued for this host. Guarded for
+	# the same reason as MaxBodySize: an older generator has no Certificate field, and the
+	# host must then stay HTTP-only rather than name a certificate file that isn't there.
+	listen 443 ssl;
+	ssl_certificate {{ server.Certificate }};
+	ssl_certificate_key {{ server.CertificateKey }};
+	{% endif %}
 	access_log /var/log/nginx/access.log vhost;
 
 	{% for location in server.Locations %}

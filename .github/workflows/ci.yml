@@ -57,12 +57,28 @@ jobs:
       - name: The shipped configuration must load
         run: docker run --rm docker-proxy:ci nginx -t
 
+      # A throwaway CA and one host certificate, standing in for what docker-config-gen
+      # issues into the certs volume.
+      - name: Test certificates
+        run: |
+          set -euo pipefail
+          d="${RUNNER_TEMP}/certs"
+          mkdir -p "$d"
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 \
+            -subj /CN=ci-ca -keyout "$d/ca.key" -out "$d/ca.crt" 2>/dev/null
+          openssl req -x509 -CA "$d/ca.crt" -CAkey "$d/ca.key" \
+            -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 \
+            -subj /CN=ci.localhost -addext subjectAltName=DNS:ci.localhost \
+            -keyout "$d/ci.localhost.key" -out "$d/ci.localhost.crt" 2>/dev/null
+
       - name: Start the container
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/proxysock"
           docker run -d --name proxy \
             -v "${RUNNER_TEMP}/proxysock:/var/run/proxy" \
+            -v "${RUNNER_TEMP}/certs:/etc/nginx/certs:ro" \
+            -p 127.0.0.1:8443:443 \
             docker-proxy:ci
           # The entrypoint generates dhparam before nginx starts, which is not instant.
           for _ in $(seq 1 60); do
@@ -122,6 +138,36 @@ jobs:
           }
           # ...and it must still load, which is what a restart would depend on.
           docker exec proxy nginx -t
+
+      # The template side of HTTPS is tested in docker-config-gen, which renders it. This
+      # checks the image: nginx serves a certificate from the certs volume, and refuses the
+      # handshake for a name it has no certificate for.
+      - name: HTTPS is served from the certs volume, and unknown names are refused
+        run: |
+          set -euo pipefail
+          d="${RUNNER_TEMP}/certs"
+          cat > tls.conf <<'EOF'
+          server { server_name _; listen 443 ssl default_server; ssl_reject_handshake on; }
+          server {
+            server_name ci.localhost;
+            listen 443 ssl;
+            ssl_certificate /etc/nginx/certs/ci.localhost.crt;
+            ssl_certificate_key /etc/nginx/certs/ci.localhost.key;
+            location / { return 200 "tls-ok"; }
+          }
+          EOF
+          code=$(curl -sS -o /tmp/out -w '%{http_code}' \
+            --unix-socket "${RUNNER_TEMP}/proxysock/management.sock" \
+            -X POST --data-binary @tls.conf http://localhost/config)
+          [ "$code" = 200 ] || { echo "POST /config returned ${code}"; cat /tmp/out; exit 1; }
+
+          body=$(curl -fsS --cacert "$d/ca.crt" --resolve ci.localhost:8443:127.0.0.1 https://ci.localhost:8443/)
+          [ "$body" = tls-ok ] || { echo "unexpected body: ${body}" >&2; exit 1; }
+
+          # curl exits 35 when the handshake itself fails.
+          rc=0
+          curl -sS -k --resolve other.localhost:8443:127.0.0.1 https://other.localhost:8443/ -o /dev/null 2>/dev/null || rc=$?
+          [ "$rc" = 35 ] || { echo "a name with no certificate was not refused (curl exit ${rc})" >&2; exit 1; }
 
       - name: The container must still be running
         run: |
