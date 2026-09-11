@@ -2,9 +2,13 @@ name: Merge on green
 
 # Squash-merges a pull request as soon as CI passes on it, then publishes the image.
 #
-# The merge is made with this workflow's token, and GitHub starts no workflows for
-# pushes made with that token, so the Docker workflow would never run for the merged
-# commit. It is started here explicitly instead (workflow_dispatch is the exception).
+# When another pull request merged first, this one is out of date with main and
+# branch protection refuses it. It is then brought up to date and CI runs on the
+# result; when that passes, this workflow runs again and merges it.
+#
+# Merges and branch updates made with this workflow's token start no workflows, so
+# the Docker workflow and that CI run are started explicitly (workflow_dispatch is the
+# exception).
 on:
   workflow_run:
     workflows: [CI]
@@ -19,14 +23,16 @@ jobs:
   merge:
     name: Merge
     # A successful CI run on a pull request from this repository (Dependabot's
-    # included). Pull requests from forks are left for a person.
+    # included), or the run started here after bringing one up to date. Pull requests
+    # from forks are left for a person.
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request' &&
+      (github.event.workflow_run.event == 'pull_request' ||
+       github.event.workflow_run.event == 'workflow_dispatch') &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - name: Merge the pull request
+      - name: Merge the pull request, or bring it up to date
         id: merge
         env:
           GH_TOKEN: ${{ github.token }}
@@ -44,8 +50,37 @@ jobs:
             exit 0
           fi
           # Only the commit CI just passed, never one pushed since.
-          gh pr merge "$pr" -R "$REPO" --squash --delete-branch --match-head-commit "$HEAD_SHA"
-          echo "merged=true" >> "$GITHUB_OUTPUT"
+          if gh pr merge "$pr" -R "$REPO" --squash --delete-branch --match-head-commit "$HEAD_SHA"; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Refused. If only because main moved on, bring the branch up to date and run
+          # CI on the result; any other reason is for a person.
+          state=UNKNOWN
+          for _ in $(seq 1 6); do
+            state=$(gh pr view "$pr" -R "$REPO" --json mergeStateStatus --jq .mergeStateStatus)
+            [ "$state" != UNKNOWN ] && break
+            sleep 5
+          done
+          if [ "$state" != BEHIND ]; then
+            echo "#$pr was not merged, and not because it is behind $BASE (merge state: $state)." >&2
+            exit 1
+          fi
+          gh pr update-branch "$pr" -R "$REPO"
+          # The update can land a moment later, and CI has to run on the updated head.
+          head="$HEAD_SHA"
+          for _ in $(seq 1 30); do
+            head=$(gh pr view "$pr" -R "$REPO" --json headRefOid --jq .headRefOid)
+            [ "$head" != "$HEAD_SHA" ] && break
+            sleep 2
+          done
+          if [ "$head" = "$HEAD_SHA" ]; then
+            echo "#$pr was not brought up to date within a minute." >&2
+            exit 1
+          fi
+          gh workflow run ci.yml -R "$REPO" --ref "$BRANCH"
+          echo "#$pr was behind $BASE: brought it up to date and started CI on it."
 
       - name: Publish the image
         if: steps.merge.outputs.merged == 'true'
