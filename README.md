@@ -7,14 +7,18 @@ Unlike the original `nginx-proxy` architecture (where the proxy container often 
 - The **proxy** container runs NGINX and exposes ports `80` and `443`.
 - A separate companion container (**docker-config-gen**) watches Docker events via the Docker socket and communicates with the proxy over a **management Unix socket** on a shared Docker volume.
 
-## Docker Compose (development)
+## Running it
 
-This repo includes a `docker-compose.yml` intended for development. It mounts:
+[ddt](https://github.com/antimatter-studios/docker-dev-tools) runs it (`ddt proxy start`), with docker-config-gen beside it sharing the management volume at `/var/run/proxy` and the certs volume at `/etc/nginx/certs`. To try a local build, run `chore image:build`, then `ddt proxy docker-image ghcr.io/antimatter-studios/docker-proxy:dev` and `ddt proxy restart`.
 
-- `management:/var/run/proxy` (shared management socket volume)
-- `certs:/etc/nginx/certs` (TLS cert storage)
+## Developing it
 
-`docker-config-gen` should be run from its own repository and share the same `management`/`certs` volumes.
+```bash
+chore test          # the management server's unit tests
+chore image:smoke   # build the image and check what ships: nginx, the entrypoint, the management API and HTTPS
+```
+
+CI runs the same, and a pull request merges itself once CI passes. The template is rendered and tested in docker-config-gen, whose CI renders the one on this repository's main branch.
 
 ## Landing page
 

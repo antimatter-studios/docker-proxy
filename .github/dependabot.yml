@@ -9,3 +9,9 @@ updates:
     labels:
       - "area/chore"
       - "area/dockerfile"
+
+  # The workflows' actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
