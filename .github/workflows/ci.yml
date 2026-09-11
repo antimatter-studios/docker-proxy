@@ -161,7 +161,11 @@ jobs:
             -X POST --data-binary @tls.conf http://localhost/config)
           [ "$code" = 200 ] || { echo "POST /config returned ${code}"; cat /tmp/out; exit 1; }
 
-          body=$(curl -fsS --cacert "$d/ca.crt" --resolve ci.localhost:8443:127.0.0.1 https://ci.localhost:8443/)
+          # nginx reloads after answering POST /config, so 443 may not be listening yet,
+          # and Docker's port forward accepts the connection anyway and then resets it.
+          # Retry until the new configuration is live.
+          body=$(curl -fsS --retry 10 --retry-delay 1 --retry-all-errors \
+            --cacert "$d/ca.crt" --resolve ci.localhost:8443:127.0.0.1 https://ci.localhost:8443/)
           [ "$body" = tls-ok ] || { echo "unexpected body: ${body}" >&2; exit 1; }
 
           # curl exits 35 when the handshake itself fails.
